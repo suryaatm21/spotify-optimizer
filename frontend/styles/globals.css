@@ -1,0 +1,175 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom CSS for the Spotify Playlist Optimizer */
+
+@layer base {
+  html {
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+  
+  body {
+    @apply bg-spotify-black text-white;
+  }
+}
+
+@layer components {
+  /* Custom button styles */
+  .btn-primary {
+    @apply bg-spotify-green hover:bg-spotify-green/90 text-white font-medium px-4 py-2 rounded-lg transition-colors;
+  }
+  
+  .btn-secondary {
+    @apply bg-spotify-gray-700 hover:bg-spotify-gray-600 text-white font-medium px-4 py-2 rounded-lg transition-colors;
+  }
+  
+  /* Card styles */
+  .card {
+    @apply bg-spotify-gray-800/50 backdrop-blur-sm border border-spotify-gray-700 rounded-xl p-6;
+  }
+  
+  /* Loading animation */
+  .loading-pulse {
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+  
+  /* Text truncation */
+  .line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  
+  .line-clamp-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+}
+
+@layer utilities {
+  /* Custom scrollbar */
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: #404040 #1f2937;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 8px;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: #1f2937;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: #404040;
+    border-radius: 4px;
+    border: 2px solid #1f2937;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background-color: #525252;
+  }
+  
+  /* Glassmorphism effect */
+  .glass {
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+  
+  /* Focus styles */
+  .focus-ring {
+    @apply focus:outline-none focus:ring-2 focus:ring-spotify-green focus:ring-offset-2 focus:ring-offset-spotify-black;
+  }
+}
+
+/* Animation keyframes */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* Utility classes for animations */
+.animate-fade-in {
+  animation: fadeIn 0.5s ease-out;
+}
+
+.animate-slide-up {
+  animation: slideUp 0.3s ease-out;
+}
+
+/* Custom table styles */
+.stats-table {
+  @apply w-full text-sm;
+}
+
+.stats-table th {
+  @apply text-left p-3 font-medium text-spotify-gray-300 border-b border-spotify-gray-700;
+}
+
+.stats-table td {
+  @apply p-3 text-spotify-gray-300 border-b border-spotify-gray-800;
+}
+
+.stats-table tr:hover {
+  @apply bg-spotify-gray-800/50;
+}
+
+/* Chart container styles */
+.chart-container {
+  @apply bg-spotify-gray-800/30 rounded-xl p-4 border border-spotify-gray-700;
+}
+
+/* Responsive utilities */
+@media (max-width: 640px) {
+  .mobile-stack {
+    @apply flex-col space-y-4 space-x-0;
+  }
+  
+  .mobile-full {
+    @apply w-full;
+  }
+}
+
+/* Print styles */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  
+  .print-friendly {
+    @apply bg-white text-black;
+  }
+}
