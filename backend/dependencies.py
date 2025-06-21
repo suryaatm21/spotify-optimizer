@@ -11,8 +11,12 @@ from sqlalchemy.orm import sessionmaker, Session
 from jose import JWTError, jwt
 import os
 from datetime import datetime, timedelta
+from dotenv import load_dotenv
 
 from models import User
+
+# Load environment variables
+load_dotenv()
 
 # Database configuration
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./spotify_optimizer.db")
@@ -130,13 +134,14 @@ def get_spotify_client_credentials() -> dict:
     Get Spotify API client credentials from environment variables.
     
     Returns:
-        dict: Dictionary containing client_id and client_secret
+        dict: Dictionary containing client_id, client_secret, and redirect_uri
         
     Raises:
         HTTPException: If credentials are not configured
     """
     client_id = os.getenv("SPOTIFY_CLIENT_ID")
     client_secret = os.getenv("SPOTIFY_CLIENT_SECRET")
+    redirect_uri = os.getenv("SPOTIFY_REDIRECT_URI", "http://127.0.0.1:3000/callback")
     
     if not client_id or not client_secret:
         raise HTTPException(
@@ -147,5 +152,5 @@ def get_spotify_client_credentials() -> dict:
     return {
         "client_id": client_id,
         "client_secret": client_secret,
-        "redirect_uri": os.getenv("SPOTIFY_REDIRECT_URI", "http://localhost:3000/callback")
+        "redirect_uri": redirect_uri
     }
