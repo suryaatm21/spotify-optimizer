@@ -132,8 +132,9 @@ async def get_playlist_tracks(
         
         tracks_data = tracks_response.json()
         track_ids = [item["track"]["id"] for item in tracks_data["items"] if item["track"]["id"]]
-        
+
         # Get audio features for all tracks
+        features_map = {}
         if track_ids:
             features_response = await client.get(
                 "https://api.spotify.com/v1/audio-features",
