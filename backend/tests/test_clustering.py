@@ -4,8 +4,8 @@ Test cases for the clustering service functionality.
 import pytest
 from unittest.mock import Mock
 
-from services.clustering import ClusteringService
-from models import Track
+from backend.services.clustering import ClusteringService
+from backend.models import Track
 
 class TestClusteringService:
     """Test cases for the ClusteringService class."""

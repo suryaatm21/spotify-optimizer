@@ -4,7 +4,7 @@ Run this script to create the database tables.
 """
 import os
 from sqlalchemy import create_engine
-from models import Base
+from backend.models import Base
 
 def create_database():
     """Create all database tables."""

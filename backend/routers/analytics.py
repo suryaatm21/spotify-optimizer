@@ -6,14 +6,17 @@ from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
 import httpx
 import json
+import logging
 
-from dependencies import get_database, get_current_user
-from models import User, Playlist, Track, PlaylistAnalysis
-from schemas import (
+from backend.dependencies import get_database, get_current_user
+from backend.models import User, Playlist, Track, PlaylistAnalysis
+from backend.schemas import (
     PlaylistResponse, TrackResponse, AnalysisRequest, AnalysisResponse,
     PlaylistStats, OptimizationResponse
 )
-from services.clustering import ClusteringService
+from backend.services.clustering import ClusteringService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -40,6 +43,11 @@ async def get_user_playlists(
         )
         
         if response.status_code != 200:
+            logger.error(
+                "Failed to fetch playlists: %s - %s",
+                response.status_code,
+                response.text,
+            )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Failed to fetch playlists from Spotify"
@@ -125,6 +133,11 @@ async def get_playlist_tracks(
         )
         
         if tracks_response.status_code != 200:
+            logger.error(
+                "Failed to fetch tracks: %s - %s",
+                tracks_response.status_code,
+                tracks_response.text,
+            )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Failed to fetch tracks from Spotify"
@@ -142,6 +155,11 @@ async def get_playlist_tracks(
             )
             
             if features_response.status_code != 200:
+                logger.error(
+                    "Failed to fetch audio features: %s - %s",
+                    features_response.status_code,
+                    features_response.text,
+                )
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Failed to fetch audio features from Spotify"

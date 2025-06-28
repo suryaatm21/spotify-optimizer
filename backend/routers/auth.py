@@ -9,9 +9,14 @@ import httpx
 import urllib.parse
 from datetime import datetime, timedelta
 
-from dependencies import get_database, get_spotify_client_credentials, create_access_token, get_current_user
-from models import User
-from schemas import AuthCallbackRequest, TokenResponse, UserResponse
+from backend.dependencies import (
+    get_database,
+    get_spotify_client_credentials,
+    create_access_token,
+    get_current_user,
+)
+from backend.models import User
+from backend.schemas import AuthCallbackRequest, TokenResponse, UserResponse
 
 router = APIRouter()
 
@@ -30,7 +35,10 @@ async def spotify_login():
         "client_id": credentials["client_id"],
         "response_type": "code",
         "redirect_uri": credentials["redirect_uri"],
-        "scope": "user-read-private user-read-email playlist-read-private playlist-read-collaborative",
+        "scope": (
+            "user-read-private user-read-email playlist-read-private "
+            "playlist-read-collaborative user-library-read"
+        ),
         "state": "random_state_string"  # In production, use a secure random state
     }
     
@@ -216,3 +224,16 @@ async def refresh_token(
         token_type="bearer",
         expires_in=1800
     )
+
+
+@router.post("/logout")
+async def logout(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_database),
+):
+    """Invalidate the user's tokens and log them out."""
+    current_user.access_token = ""
+    current_user.refresh_token = None
+    current_user.token_expires_at = None
+    db.commit()
+    return {"message": "Logged out"}
