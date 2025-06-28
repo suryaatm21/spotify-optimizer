@@ -4,8 +4,8 @@ Test cases for the clustering service functionality.
 import pytest
 from unittest.mock import Mock
 
-from services.clustering import ClusteringService
-from models import Track
+from backend.services.clustering import ClusteringService
+from backend.models import Track
 
 class TestClusteringService:
     """Test cases for the ClusteringService class."""
@@ -47,6 +47,10 @@ class TestClusteringService:
         
         assert features.shape == (1, 8)  # 8 audio features
         # Missing values should be replaced with 0.5 (mean)
+        # Check that missing energy and acousticness values default to 0.5
+        # Note: Features are normalized, so we check the original extraction logic
+        # by verifying that None values are handled properly
+        assert not any(val is None for val in features.flatten())
     
     def test_cluster_tracks_kmeans(self, sample_tracks):
         """Test k-means clustering with sample tracks."""

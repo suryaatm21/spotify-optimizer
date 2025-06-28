@@ -59,8 +59,8 @@ export default function StatsTable({ tracks, clusters = [] }: IStatsTableProps) 
       );
     }
     
-    // Sort tracks
-    return filtered.sort((a, b) => {
+    // Sort tracks (create a new array to avoid mutating props)
+    return [...filtered].sort((a, b) => {
       let aValue: any;
       let bValue: any;
       

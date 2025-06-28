@@ -8,9 +8,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from datetime import datetime, timedelta
 
-from main import app
-from dependencies import get_database
-from models import Base, User, Playlist, Track
+from backend.main import app
+from backend.dependencies import get_database
+from backend.models import Base, User, Playlist, Track
 
 # Test database configuration
 TEST_DATABASE_URL = "sqlite:///./test_spotify_optimizer.db"
@@ -42,8 +42,15 @@ def setup_database():
 @pytest.fixture
 def db_session(setup_database) -> Generator[Session, None, None]:
     """Create a fresh database session for each test."""
+    # Clean up any existing data from previous tests
     db = TestingSessionLocal()
     try:
+        # Delete all data in reverse order to respect foreign key constraints
+        db.query(Track).delete()
+        db.query(Playlist).delete()
+        db.query(User).delete()
+        db.commit()
+        
         yield db
     finally:
         db.rollback()
@@ -156,7 +163,7 @@ def sample_tracks(db_session: Session, sample_playlist: Playlist) -> list[Track]
 @pytest.fixture
 def auth_headers(sample_user: User) -> dict:
     """Create authentication headers for testing."""
-    from dependencies import create_access_token
+    from backend.dependencies import create_access_token
     
     token = create_access_token(data={"sub": sample_user.spotify_user_id})
     return {"Authorization": f"Bearer {token}"}

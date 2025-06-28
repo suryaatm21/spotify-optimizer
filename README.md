@@ -64,8 +64,6 @@ spotify-optimizer/
 │   │   ├── OptimizationPanel.tsx # Suggestions panel
 │   │   ├── LoadingSpinner.tsx # Loading indicator
 │   │   └── ErrorMessage.tsx  # Error display component
-│   ├── lib/
-│   │   └── api.ts           # API client and utilities
 │   ├── hooks/
 │   │   └── useAuth.tsx      # Authentication hook
 │   ├── types/
