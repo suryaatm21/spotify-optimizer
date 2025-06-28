@@ -7,15 +7,114 @@ from sqlalchemy.orm import Session
 import httpx
 import json
 
-from dependencies import get_database, get_current_user
-from models import User, Playlist, Track, PlaylistAnalysis
-from schemas import (
+from ..dependencies import get_database, get_current_user
+from ..models import User, Playlist, Track, PlaylistAnalysis
+from ..schemas import (
     PlaylistResponse, TrackResponse, AnalysisRequest, AnalysisResponse,
     PlaylistStats, OptimizationResponse
 )
-from services.clustering import ClusteringService
+from ..services.clustering import ClusteringService
 
 router = APIRouter()
+
+async def _fetch_and_store_playlist_tracks(
+    playlist: Playlist, current_user: User, db: Session
+) -> List[Track]:
+    """
+    Fetches tracks and audio features for a given playlist from Spotify,
+    stores them in the database, and returns the list of Track ORM objects.
+    Raises HTTPException if Spotify API calls fail.
+    """
+    async with httpx.AsyncClient() as client:
+        # Get user's access token
+        access_token = current_user.access_token
+        
+        print(f"DEBUG: Using access token ending in ...{access_token[-4:]} for user {current_user.spotify_user_id}")
+
+        # Get playlist tracks from Spotify
+        headers = {"Authorization": f"Bearer {access_token}"}
+        
+        # Fetch tracks from Spotify
+        tracks_response = await client.get(
+            f"https://api.spotify.com/v1/playlists/{playlist.spotify_playlist_id}/tracks",
+            headers=headers,
+            params={"limit": 100, "fields": "items(track(id,name,artists,album,duration_ms,popularity))"}
+        )
+        
+        if tracks_response.status_code != 200:
+            print(f"ERROR: Failed to fetch playlist tracks from Spotify. Status: {tracks_response.status_code}, Response: {tracks_response.text}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Failed to fetch tracks from Spotify: {tracks_response.text}"
+            )
+        
+        tracks_data = tracks_response.json()
+        
+        track_ids = []
+        for item in tracks_data.get("items", []):
+            track_info = item.get("track")
+            if track_info and track_info.get("id"):
+                track_ids.append(track_info["id"])
+
+        features_map = {}
+        if track_ids:
+            # Get audio features for all tracks
+            features_response = await client.get(
+                "https://api.spotify.com/v1/audio-features",
+                headers=headers,
+                params={"ids": ",".join(track_ids)}
+            )
+            
+            if features_response.status_code != 200:
+                error_payload = features_response.json()
+                print(f"ERROR: Failed to fetch audio features from Spotify. Status: {features_response.status_code}, Response: {error_payload}")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={"message": "Error fetching audio features from Spotify", "spotify_error": error_payload}
+                )
+                
+            features_data = features_response.json()
+            features_map = {f["id"]: f for f in features_data.get("audio_features", []) if f}
+
+    # Store tracks in database
+    new_tracks = []
+    for item in tracks_data.get("items", []):
+        track_data = item.get("track")
+        if not track_data or not track_data.get("id"):
+            continue
+            
+        features = features_map.get(track_data["id"], {})
+        
+        track = Track(
+            spotify_track_id=track_data["id"],
+            name=track_data["name"],
+            artist=", ".join([artist["name"] for artist in track_data.get("artists", [])]),
+            album=track_data.get("album", {}).get("name"),
+            duration_ms=track_data.get("duration_ms"),
+            popularity=track_data.get("popularity"),
+            playlist_id=playlist.id,
+            danceability=features.get("danceability"),
+            energy=features.get("energy"),
+            key=features.get("key"),
+            loudness=features.get("loudness"),
+            mode=features.get("mode"),
+            speechiness=features.get("speechiness"),
+            acousticness=features.get("acousticness"),
+            instrumentalness=features.get("instrumentalness"),
+            liveness=features.get("liveness"),
+            valence=features.get("valence"),
+            tempo=features.get("tempo")
+        )
+        
+        db.add(track)
+        new_tracks.append(track)
+    
+    if new_tracks:
+        db.commit()
+        for track in new_tracks:
+            db.refresh(track)
+    
+    return new_tracks
 
 @router.get("/playlists", response_model=List[PlaylistResponse])
 async def get_user_playlists(
@@ -87,19 +186,8 @@ async def get_playlist_tracks(
 ):
     """
     Get all tracks for a specific playlist with audio features.
-    
-    Args:
-        playlist_id: Database ID of the playlist
-        current_user: Current authenticated user
-        db: Database session
-        
-    Returns:
-        List[TrackResponse]: List of tracks with audio features
-        
-    Raises:
-        HTTPException: If playlist not found or access denied
+    If tracks are not in the database, they are fetched from Spotify.
     """
-    # Get playlist from database
     playlist = db.query(Playlist).filter(
         Playlist.id == playlist_id,
         Playlist.user_id == current_user.id
@@ -117,74 +205,9 @@ async def get_playlist_tracks(
         return [TrackResponse.from_orm(track) for track in existing_tracks]
     
     # Fetch tracks from Spotify
-    async with httpx.AsyncClient() as client:
-        tracks_response = await client.get(
-            f"https://api.spotify.com/v1/playlists/{playlist.spotify_playlist_id}/tracks",
-            headers={"Authorization": f"Bearer {current_user.access_token}"},
-            params={"limit": 100, "fields": "items(track(id,name,artists,album,duration_ms,popularity))"}
-        )
-        
-        if tracks_response.status_code != 200:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to fetch tracks from Spotify"
-            )
-        
-        tracks_data = tracks_response.json()
-        track_ids = [item["track"]["id"] for item in tracks_data["items"] if item["track"]["id"]]
-        
-        # Get audio features for all tracks
-        if track_ids:
-            features_response = await client.get(
-                "https://api.spotify.com/v1/audio-features",
-                headers={"Authorization": f"Bearer {current_user.access_token}"},
-                params={"ids": ",".join(track_ids)}
-            )
-            
-            if features_response.status_code != 200:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Failed to fetch audio features from Spotify"
-                )
-            
-            features_data = features_response.json()
-            features_map = {f["id"]: f for f in features_data["audio_features"] if f}
+    new_tracks = await _fetch_and_store_playlist_tracks(playlist, current_user, db)
     
-    # Store tracks in database
-    tracks = []
-    for item in tracks_data["items"]:
-        track_data = item["track"]
-        if not track_data["id"]:
-            continue
-            
-        features = features_map.get(track_data["id"], {})
-        
-        track = Track(
-            spotify_track_id=track_data["id"],
-            name=track_data["name"],
-            artist=", ".join([artist["name"] for artist in track_data["artists"]]),
-            album=track_data["album"]["name"] if track_data["album"] else None,
-            duration_ms=track_data.get("duration_ms"),
-            popularity=track_data.get("popularity"),
-            playlist_id=playlist_id,
-            danceability=features.get("danceability"),
-            energy=features.get("energy"),
-            key=features.get("key"),
-            loudness=features.get("loudness"),
-            mode=features.get("mode"),
-            speechiness=features.get("speechiness"),
-            acousticness=features.get("acousticness"),
-            instrumentalness=features.get("instrumentalness"),
-            liveness=features.get("liveness"),
-            valence=features.get("valence"),
-            tempo=features.get("tempo")
-        )
-        
-        db.add(track)
-        tracks.append(track)
-    
-    db.commit()
-    return [TrackResponse.from_orm(track) for track in tracks]
+    return [TrackResponse.from_orm(track) for track in new_tracks]
 
 @router.post("/playlists/{playlist_id}/analyze", response_model=AnalysisResponse)
 async def analyze_playlist(
@@ -224,6 +247,8 @@ async def analyze_playlist(
     
     # Get tracks with audio features
     tracks = db.query(Track).filter(Track.playlist_id == playlist_id).all()
+    if not tracks:
+        tracks = await _fetch_and_store_playlist_tracks(playlist, current_user, db)
     
     if len(tracks) < analysis_request.cluster_count:
         raise HTTPException(
@@ -295,11 +320,13 @@ async def get_playlist_stats(
         )
     
     tracks = db.query(Track).filter(Track.playlist_id == playlist_id).all()
-    
+    if not tracks:
+        tracks = await _fetch_and_store_playlist_tracks(playlist, current_user, db)
+
     if not tracks:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No tracks found for playlist"
+            detail="No tracks found for this playlist. It might be empty."
         )
     
     # Calculate statistics using ClusteringService
@@ -352,6 +379,15 @@ async def get_optimization_suggestions(
         )
     
     tracks = db.query(Track).filter(Track.playlist_id == playlist_id).all()
+    if not tracks:
+        tracks = await _fetch_and_store_playlist_tracks(playlist, current_user, db)
+
+    if not tracks:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No tracks found for this playlist. It might be empty."
+        )
+        
     clustering_service = ClusteringService()
     
     # Get current stats
@@ -367,3 +403,46 @@ async def get_optimization_suggestions(
         suggestions=suggestions,
         analysis_id=latest_analysis.id
     )
+
+
+
+@router.get("/debug/playlists/{playlist_id}")
+async def debug_playlist(
+    playlist_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_database)
+):
+    """Debug endpoint to check playlist and user data."""
+    try:
+        # Check if playlist exists
+        playlist = db.query(Playlist).filter(
+            Playlist.id == playlist_id,
+            Playlist.user_id == current_user.id
+        ).first()
+        
+        if not playlist:
+            return {
+                "error": "Playlist not found",
+                "playlist_id": playlist_id,
+                "user_id": current_user.id,
+                "all_playlists": [p.id for p in db.query(Playlist).filter(Playlist.user_id == current_user.id).all()]
+            }
+        
+        tracks_count = db.query(Track).filter(Track.playlist_id == playlist_id).count()
+        
+        return {
+            "playlist_found": True,
+            "playlist": {
+                "id": playlist.id,
+                "spotify_id": playlist.spotify_playlist_id,
+                "name": playlist.name,
+                "user_id": playlist.user_id
+            },
+            "tracks_count": tracks_count,
+            "user": {
+                "id": current_user.id,
+                "spotify_id": current_user.spotify_user_id
+            }
+        }
+    except Exception as e:
+        return {"error": str(e)}

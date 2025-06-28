@@ -19,6 +19,29 @@ export default function Dashboard() {
   const router = useRouter();
   const { user, logout, isLoading: authLoading } = useAuth();
   const [selectedPlaylist, setSelectedPlaylist] = useState<IPlaylist | null>(null);
+  const [isMounted, setIsMounted] = useState(false);
+
+  // Ensure component is mounted before using router
+  useEffect(() => {
+    setIsMounted(true);
+    
+    // Debug: Log authentication info
+    if (typeof window !== "undefined") {
+      const token = localStorage.getItem("access_token");
+      console.log("Debug - Auth state:", {
+        user: user,
+        hasToken: !!token,
+        tokenLength: token?.length,
+        tokenPreview: token?.substring(0, 50) + "...",
+        isLoading: authLoading
+      });
+      
+      // If we have a token but no user, there might be a token verification issue
+      if (token && !user && !authLoading) {
+        console.warn("Warning: Token exists but user is null. Token might be invalid or expired.");
+      }
+    }
+  }, [user, authLoading]);
 
   // Fetch user playlists
   const { 
@@ -33,7 +56,9 @@ export default function Dashboard() {
 
   const handlePlaylistSelect = (playlist: IPlaylist) => {
     setSelectedPlaylist(playlist);
-    router.push(`/playback-stats/${playlist.id}`);
+    if (isMounted) {
+      router.push(`/playback-stats/${playlist.id}`);
+    }
   };
 
   const handleRefreshPlaylists = async () => {
@@ -42,11 +67,13 @@ export default function Dashboard() {
 
   const handleLogout = async () => {
     await logout();
-    router.push("/");
+    if (isMounted) {
+      router.push("/");
+    }
   };
 
-  // Show loading spinner while checking auth
-  if (authLoading) {
+  // Show loading spinner while checking auth or component is mounting
+  if (authLoading || !isMounted) {
     return (
       <div className="min-h-screen bg-spotify-gray-900 flex items-center justify-center">
         <LoadingSpinner size="large" />
@@ -54,10 +81,45 @@ export default function Dashboard() {
     );
   }
 
-  // Redirect to login if not authenticated
+  // Show login page if not authenticated
   if (!user) {
-    router.push("/");
-    return null;
+    return (
+      <Layout
+        title="Spotify Playlist Optimizer"
+        description="Analyze and optimize your Spotify playlists with machine learning"
+      >
+        <div className="min-h-screen bg-gradient-to-br from-spotify-gray-900 via-spotify-gray-800 to-spotify-black flex items-center justify-center">
+          <div className="max-w-md w-full space-y-8 p-8">
+            <div className="text-center">
+              <Music className="h-16 w-16 text-spotify-green mx-auto mb-4" />
+              <h1 className="text-4xl font-bold text-white mb-2">
+                Spotify Playlist Optimizer
+              </h1>
+              <p className="text-spotify-gray-300 mb-8">
+                Analyze and optimize your Spotify playlists with machine learning clustering algorithms
+              </p>
+              
+              <a
+                href="/api/auth/login"
+                className="inline-flex items-center space-x-3 px-8 py-4 bg-spotify-green hover:bg-spotify-green/90 text-white font-semibold rounded-full transition-colors text-lg"
+              >
+                <Music className="h-5 w-5" />
+                <span>Connect to Spotify</span>
+              </a>
+              
+              <div className="mt-8 text-spotify-gray-400 text-sm">
+                <p>This app requires access to your Spotify account to:</p>
+                <ul className="list-disc list-inside mt-2 space-y-1">
+                  <li>View your playlists</li>
+                  <li>Analyze audio features</li>
+                  <li>Provide optimization suggestions</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Layout>
+    );
   }
 
   return (

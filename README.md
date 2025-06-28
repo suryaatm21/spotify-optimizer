@@ -13,6 +13,7 @@ A full-stack application that analyzes and optimizes Spotify playlists using mac
 ## Tech Stack
 
 ### Backend
+
 - **FastAPI**: Modern Python web framework for building APIs
 - **SQLAlchemy**: SQL toolkit and Object-Relational Mapping (ORM) library
 - **PostgreSQL/SQLite**: Database for storing user and playlist data
@@ -21,6 +22,7 @@ A full-stack application that analyzes and optimizes Spotify playlists using mac
 - **Pydantic**: Data validation using Python type annotations
 
 ### Frontend
+
 - **Next.js**: React framework with TypeScript
 - **Tailwind CSS**: Utility-first CSS framework
 - **SWR**: Data fetching library for React
@@ -89,22 +91,26 @@ spotify-optimizer/
 ### Backend Setup
 
 1. **Navigate to the backend directory:**
+
    ```bash
    cd backend
    ```
 
 2. **Create a virtual environment:**
+
    ```bash
    python -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
 
 3. **Install dependencies:**
+
    ```bash
    pip install -r requirements.txt
    ```
 
 4. **Set up environment variables:**
+
    ```bash
    cp .env.example .env
    # Edit .env with your Spotify API credentials
@@ -120,11 +126,13 @@ The backend API will be available at `http://localhost:8000`
 ### Frontend Setup
 
 1. **Navigate to the frontend directory:**
+
    ```bash
    cd frontend
    ```
 
 2. **Install dependencies:**
+
    ```bash
    npm install
    ```
@@ -146,12 +154,14 @@ The frontend will be available at `http://localhost:3000`
 ## API Endpoints
 
 ### Authentication
+
 - `GET /api/auth/login` - Initiate Spotify OAuth flow
 - `POST /api/auth/callback` - Handle OAuth callback
 - `GET /api/auth/me` - Get current user info
 - `POST /api/auth/refresh` - Refresh access token
 
 ### Analytics
+
 - `GET /api/analytics/playlists` - Get user playlists
 - `GET /api/analytics/playlists/{id}/tracks` - Get playlist tracks
 - `GET /api/analytics/playlists/{id}/stats` - Get playlist statistics
@@ -161,12 +171,14 @@ The frontend will be available at `http://localhost:3000`
 ## Features
 
 ### Machine Learning Analysis
+
 - **K-means Clustering**: Groups similar tracks based on audio features
 - **DBSCAN Clustering**: Identifies clusters of varying densities
 - **PCA Visualization**: 2D projection of high-dimensional audio features
 - **Silhouette Analysis**: Measures clustering quality
 
 ### Audio Features Analyzed
+
 - Danceability
 - Energy
 - Speechiness
@@ -177,6 +189,7 @@ The frontend will be available at `http://localhost:3000`
 - Tempo
 
 ### Optimization Suggestions
+
 - Outlier detection and removal recommendations
 - Theme consistency analysis
 - Energy flow optimization
@@ -186,12 +199,14 @@ The frontend will be available at `http://localhost:3000`
 ## Testing
 
 ### Backend Tests
+
 ```bash
 cd backend
 pytest
 ```
 
 ### Frontend Tests
+
 ```bash
 cd frontend
 npm test
@@ -200,11 +215,13 @@ npm test
 ## Deployment
 
 ### Backend (Railway/Heroku)
+
 1. Set up environment variables in your hosting platform
 2. Deploy the FastAPI application
 3. Run database migrations
 
 ### Frontend (Vercel/Netlify)
+
 1. Connect your GitHub repository
 2. Set build command: `npm run build`
 3. Set environment variables for API URL

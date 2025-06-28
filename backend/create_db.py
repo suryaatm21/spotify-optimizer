@@ -9,7 +9,7 @@ from models import Base
 def create_database():
     """Create all database tables."""
     # Get database URL from environment variable or use default SQLite
-    database_url = os.getenv("DATABASE_URL", "sqlite:///./spotify_optimizer.db")
+    database_url = os.getenv("DATABASE_URL", "sqlite:///./spotify.db")
     
     # Create engine
     engine = create_engine(database_url)

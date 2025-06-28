@@ -2,18 +2,33 @@
 Authentication router for Spotify OAuth2 flow.
 """
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Response
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 import httpx
 import urllib.parse
 from datetime import datetime, timedelta
 
-from dependencies import get_database, get_spotify_client_credentials, create_access_token, get_current_user
-from models import User
-from schemas import AuthCallbackRequest, TokenResponse, UserResponse
+from ..dependencies import get_database, create_access_token, get_current_user, get_spotify_client_credentials
+from ..models import User
+from ..schemas import AuthCallbackRequest, TokenResponse, UserResponse
 
 router = APIRouter()
+
+# Define the comprehensive list of scopes required
+REQUIRED_SCOPES = " ".join([
+    "user-read-private",
+    "playlist-read-private",
+    "playlist-modify-public",
+    "playlist-modify-private",
+    "user-library-read",
+    "user-library-modify",
+    "user-read-playback-state",
+    "user-read-recently-played",
+    "user-top-read",
+    "user-read-email",
+    "user-read-playback-position"
+])
 
 @router.get("/login")
 async def spotify_login():
@@ -30,12 +45,38 @@ async def spotify_login():
         "client_id": credentials["client_id"],
         "response_type": "code",
         "redirect_uri": credentials["redirect_uri"],
-        "scope": "user-read-private user-read-email playlist-read-private playlist-read-collaborative",
+        "scope": REQUIRED_SCOPES,
         "state": "random_state_string"  # In production, use a secure random state
     }
     
     auth_url = "https://accounts.spotify.com/authorize?" + urllib.parse.urlencode(params)
     return RedirectResponse(url=auth_url)
+
+@router.post("/logout")
+def logout(
+    response: Response,
+    db: Session = Depends(get_database),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Logs out the current user by clearing their access and refresh tokens from the database
+    and removing the authentication cookie.
+    """
+    # Clear tokens from the user's database record
+    current_user.access_token = None
+    current_user.refresh_token = None
+    current_user.token_expires_at = None
+    
+    db.add(current_user)
+    db.commit()
+    
+    # The frontend should use this URL to re-initiate the login flow
+    login_url = "/api/auth/login"
+    
+    return {
+        "message": "Successfully logged out. Please log in again to apply new permissions.",
+        "redirect_url": login_url
+    }
 
 @router.post("/callback", response_model=TokenResponse)
 async def spotify_callback(

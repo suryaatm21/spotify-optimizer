@@ -20,10 +20,16 @@ import { ITrack, IPlaylistStats, IAnalysisResult, IOptimizationSuggestion } from
 export default function PlaylistStats() {
   const router = useRouter();
   const { user } = useAuth();
+  const [isMounted, setIsMounted] = useState(false);
   
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisMethod, setAnalysisMethod] = useState<"kmeans" | "dbscan">("kmeans");
   const [clusterCount, setClusterCount] = useState(3);
+
+  // Ensure component is mounted before using router
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   // Get playlistId from router when ready
   const playlistId = router.isReady ? router.query.playlistId as string : null;
@@ -93,12 +99,30 @@ export default function PlaylistStats() {
   };
 
   const handleBackToDashboard = () => {
-    router.push("/");
+    if (isMounted) {
+      router.push("/");
+    }
   };
+
+  // Show loading spinner while checking auth or component is mounting
+  if (!isMounted) {
+    return (
+      <Layout
+        title="Loading..."
+        description="Loading playlist analysis data"
+      >
+        <div className="min-h-screen bg-spotify-gray-900 flex items-center justify-center">
+          <LoadingSpinner size="large" />
+        </div>
+      </Layout>
+    );
+  }
 
   // Redirect if not authenticated
   if (!user) {
-    router.push("/");
+    if (isMounted) {
+      router.push("/");
+    }
     return null;
   }
 

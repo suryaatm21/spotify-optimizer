@@ -10,16 +10,17 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from jose import JWTError, jwt
 import os
+import httpx
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
-from models import User
+from .models import User
 
 # Load environment variables
 load_dotenv()
 
 # Database configuration
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./spotify_optimizer.db")
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./spotify.db")
 
 engine = create_engine(
     DATABASE_URL,
@@ -104,13 +105,14 @@ def get_current_user(
 ) -> User:
     """
     Get the current authenticated user from the JWT token.
+    Automatically refreshes expired Spotify access tokens.
     
     Args:
         credentials: HTTP authorization credentials containing the JWT token
         db: Database session
         
     Returns:
-        User: Current authenticated user
+        User: Current authenticated user with valid access token
         
     Raises:
         HTTPException: If user is not found or token is invalid
@@ -126,6 +128,68 @@ def get_current_user(
             detail="User not found",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    
+    # Check if access token is expired and refresh if needed
+    now = datetime.utcnow()
+    if user.token_expires_at and user.token_expires_at <= now:
+        print(f"DEBUG: Access token expired for user {user.spotify_user_id}, refreshing...")
+        
+        if not user.refresh_token:
+            print("ERROR: No refresh token available")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Access token expired and no refresh token available. Please log in again.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        # Refresh the access token
+        try:
+            credentials = get_spotify_client_credentials()
+            
+            refresh_data = {
+                "grant_type": "refresh_token",
+                "refresh_token": user.refresh_token,
+                "client_id": credentials["client_id"],
+                "client_secret": credentials["client_secret"]
+            }
+            
+            # Make request to Spotify token endpoint
+            response = httpx.post(
+                "https://accounts.spotify.com/api/token",
+                data=refresh_data,
+                headers={"Content-Type": "application/x-www-form-urlencoded"}
+            )
+            
+            if response.status_code != 200:
+                print(f"ERROR: Failed to refresh token. Status: {response.status_code}, Response: {response.text}")
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Failed to refresh access token. Please log in again.",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+            
+            token_data = response.json()
+            
+            # Update user with new tokens
+            user.access_token = token_data["access_token"]
+            if "refresh_token" in token_data:  # Spotify may or may not provide a new refresh token
+                user.refresh_token = token_data["refresh_token"]
+            user.token_expires_at = datetime.utcnow() + timedelta(seconds=token_data["expires_in"])
+            
+            db.commit()
+            db.refresh(user)
+            
+            print(f"DEBUG: Successfully refreshed access token for user {user.spotify_user_id}")
+            
+        except Exception as e:
+            print(f"ERROR: Exception during token refresh: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Failed to refresh access token. Please log in again.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+    else:
+        print(f"DEBUG: Access token for user {user.spotify_user_id} is still valid")
     
     return user
 
