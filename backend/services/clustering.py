@@ -10,8 +10,8 @@ from sklearn.decomposition import PCA
 from sklearn.metrics import silhouette_score
 import statistics
 
-from models import Track
-from schemas import ClusterData, PlaylistStats, OptimizationSuggestion
+from backend.models import Track
+from backend.schemas import ClusterData, PlaylistStats, OptimizationSuggestion
 
 class ClusteringService:
     """

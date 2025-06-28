@@ -13,8 +13,10 @@ import os
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
-from models import User
+from backend.models import User
 
+# HTTP client for Spotify token refresh
+import httpx
 # Load environment variables
 load_dotenv()
 
@@ -126,8 +128,38 @@ def get_current_user(
             detail="User not found",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+    # Refresh Spotify token if expired
+    if user.token_expires_at and user.token_expires_at <= datetime.utcnow():
+        refresh_spotify_token(user, db)
+
     return user
+
+def refresh_spotify_token(user: User, db: Session) -> None:
+    """Refresh the user's Spotify access token if possible."""
+    if not user.refresh_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token missing")
+
+    creds = get_spotify_client_credentials()
+    data = {
+        "grant_type": "refresh_token",
+        "refresh_token": user.refresh_token,
+        "client_id": creds["client_id"],
+        "client_secret": creds["client_secret"],
+    }
+    response = httpx.post(
+        "https://accounts.spotify.com/api/token",
+        data=data,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    if response.status_code != 200:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Failed to refresh access token")
+
+    token_info = response.json()
+    user.access_token = token_info["access_token"]
+    if "refresh_token" in token_info:
+        user.refresh_token = token_info["refresh_token"]
+    user.token_expires_at = datetime.utcnow() + timedelta(seconds=token_info.get("expires_in", 3600))
+    db.commit()
 
 def get_spotify_client_credentials() -> dict:
     """

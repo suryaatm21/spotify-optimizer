@@ -8,9 +8,16 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from datetime import datetime, timedelta
 
-from main import app
-from dependencies import get_database
-from models import Base, User, Playlist, Track
+import sys
+from pathlib import Path
+
+# Ensure the project root is on the import path so that the "backend"
+# package can be imported as a namespace package.
+sys.path.append(str(Path(__file__).resolve().parents[2]))
+
+from backend.main import app
+from backend.dependencies import get_database
+from backend.models import Base, User, Playlist, Track
 
 # Test database configuration
 TEST_DATABASE_URL = "sqlite:///./test_spotify_optimizer.db"
@@ -57,6 +64,12 @@ def client() -> TestClient:
 @pytest.fixture
 def sample_user(db_session: Session) -> User:
     """Create a sample user for testing."""
+    # Ensure the table is clean to avoid UNIQUE constraint errors across tests
+    db_session.query(User).delete()
+    db_session.query(Playlist).delete()
+    db_session.query(Track).delete()
+    db_session.commit()
+
     user = User(
         spotify_user_id="test_user_123",
         display_name="Test User",
@@ -156,7 +169,7 @@ def sample_tracks(db_session: Session, sample_playlist: Playlist) -> list[Track]
 @pytest.fixture
 def auth_headers(sample_user: User) -> dict:
     """Create authentication headers for testing."""
-    from dependencies import create_access_token
+    from backend.dependencies import create_access_token
     
     token = create_access_token(data={"sub": sample_user.spotify_user_id})
     return {"Authorization": f"Bearer {token}"}
