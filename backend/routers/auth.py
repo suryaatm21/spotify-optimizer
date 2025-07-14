@@ -143,7 +143,9 @@ async def spotify_callback(
     if user:
         # Update existing user
         user.access_token = token_info["access_token"]
-        user.refresh_token = token_info.get("refresh_token")
+        new_refresh_token = token_info.get("refresh_token")
+        if new_refresh_token:
+            user.refresh_token = new_refresh_token
         user.token_expires_at = datetime.utcnow() + timedelta(seconds=token_info["expires_in"])
         user.display_name = profile_data.get("display_name")
         user.email = profile_data.get("email")

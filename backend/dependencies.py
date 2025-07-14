@@ -205,9 +205,9 @@ def get_spotify_client_credentials() -> dict:
     """
     client_id = os.getenv("SPOTIFY_CLIENT_ID")
     client_secret = os.getenv("SPOTIFY_CLIENT_SECRET")
-    redirect_uri = os.getenv("SPOTIFY_REDIRECT_URI", "http://127.0.0.1:3000/callback")
+    redirect_uri = os.getenv("SPOTIFY_REDIRECT_URI")
     
-    if not client_id or not client_secret:
+    if not client_id or not client_secret or not redirect_uri:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Spotify API credentials not configured"
