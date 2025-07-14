@@ -145,7 +145,7 @@ class TestClusteringService:
         clusters, _ = self.clustering_service.cluster_tracks(sample_tracks, n_clusters=2)
         
         # Convert to dict format for the function
-        cluster_dicts = [cluster.dict() for cluster in clusters]
+        cluster_dicts = [cluster.model_dump() for cluster in clusters]
         
         suggestions = self.clustering_service.generate_optimization_suggestions(
             sample_tracks, cluster_dicts

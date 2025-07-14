@@ -58,23 +58,30 @@ async def _fetch_and_store_playlist_tracks(
 
         features_map = {}
         if track_ids:
-            # Get audio features for all tracks
-            features_response = await client.get(
-                "https://api.spotify.com/v1/audio-features",
-                headers=headers,
-                params={"ids": ",".join(track_ids)}
-            )
-            
-            if features_response.status_code != 200:
-                error_payload = features_response.json()
-                print(f"ERROR: Failed to fetch audio features from Spotify. Status: {features_response.status_code}, Response: {error_payload}")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail={"message": "Error fetching audio features from Spotify", "spotify_error": error_payload}
+            # Spotify API allows up to 100 IDs per request. Fetch in chunks to avoid errors.
+            CHUNK_SIZE = 100
+            for i in range(0, len(track_ids), CHUNK_SIZE):
+                ids_chunk = track_ids[i : i + CHUNK_SIZE]
+                features_response = await client.get(
+                    "https://api.spotify.com/v1/audio-features",
+                    headers=headers,
+                    params={"ids": ",".join(ids_chunk)}
                 )
-                
-            features_data = features_response.json()
-            features_map = {f["id"]: f for f in features_data.get("audio_features", []) if f}
+
+                if features_response.status_code != 200:
+                    error_payload = features_response.json()
+                    print(
+                        f"ERROR: Failed to fetch audio features from Spotify. "
+                        f"Status: {features_response.status_code}, Response: {error_payload}"
+                    )
+                    # Instead of failing the entire request, skip this chunk so other tracks can be processed.
+                    continue
+
+                features_data = features_response.json()
+                # Merge results into the main map
+                for f in features_data.get("audio_features", []):
+                    if f and f.get("id"):
+                        features_map[f["id"]] = f
 
     # Store tracks in database
     new_tracks = []
@@ -265,12 +272,15 @@ async def analyze_playlist(
     )
     
     # Store analysis results
+    # Convert ClusterData objects to dictionaries for JSON serialization
+    serializable_clusters = [cluster.model_dump() for cluster in clusters]
+    
     analysis = PlaylistAnalysis(
         playlist_id=playlist_id,
         cluster_count=analysis_request.cluster_count,
         cluster_method=analysis_request.cluster_method,
         silhouette_score=silhouette_score,
-        analysis_data=json.dumps(clusters)
+        analysis_data=json.dumps(serializable_clusters)
     )
     
     db.add(analysis)
