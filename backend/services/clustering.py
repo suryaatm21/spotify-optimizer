@@ -252,22 +252,26 @@ class ClusteringService:
         for cluster in cluster_objects:
             if cluster.track_count >= 3:
                 cluster_tracks = [track_dict[track_id] for track_id in cluster.track_ids if track_id in track_dict]
-                avg_energy = statistics.mean([track.energy for track in cluster_tracks if track.energy is not None])
+                energy_values = [track.energy for track in cluster_tracks if track.energy is not None]
                 
-                if avg_energy > 0.8:
-                    suggestions.append(OptimizationSuggestion(
-                        suggestion_type="energy_balance",
-                        description=f"High-energy cluster detected. Consider interspersing with lower-energy tracks for better flow.",
-                        affected_tracks=cluster.track_ids,
-                        confidence_score=0.6
-                    ))
-                elif avg_energy < 0.3:
-                    suggestions.append(OptimizationSuggestion(
-                        suggestion_type="energy_balance",
-                        description=f"Low-energy cluster detected. Consider adding some higher-energy tracks for variety.",
-                        affected_tracks=cluster.track_ids,
-                        confidence_score=0.6
-                    ))
+                # Only proceed if we have valid energy values
+                if energy_values:
+                    avg_energy = statistics.mean(energy_values)
+                    
+                    if avg_energy > 0.8:
+                        suggestions.append(OptimizationSuggestion(
+                            suggestion_type="energy_balance",
+                            description=f"High-energy cluster detected. Consider interspersing with lower-energy tracks for better flow.",
+                            affected_tracks=cluster.track_ids,
+                            confidence_score=0.6
+                        ))
+                    elif avg_energy < 0.3:
+                        suggestions.append(OptimizationSuggestion(
+                            suggestion_type="energy_balance",
+                            description=f"Low-energy cluster detected. Consider adding some higher-energy tracks for variety.",
+                            affected_tracks=cluster.track_ids,
+                            confidence_score=0.6
+                        ))
         
         # Suggestion 4: Valence (mood) diversity
         valences = [track.valence for track in tracks if track.valence is not None]
