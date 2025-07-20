@@ -9,9 +9,11 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from sklearn.metrics import silhouette_score
 import statistics
+from sqlalchemy.orm import Session
 
-from ..models import Track
-from ..schemas import ClusterData, PlaylistStats, OptimizationSuggestion
+from backend.models import Track
+from backend.schemas import ClusterData, PlaylistStats, OptimizationSuggestion
+from backend.services.audio_features import AudioFeaturesService
 
 class ClusteringService:
     """
@@ -28,6 +30,7 @@ class ClusteringService:
         """Initialize the clustering service with default configuration."""
         self.scaler = StandardScaler()
         self.pca = PCA(n_components=2)  # For visualization
+        self.audio_features_service = AudioFeaturesService()
     
     def _extract_features(self, tracks: List[Track]) -> np.ndarray:
         """
@@ -54,8 +57,9 @@ class ClusteringService:
                         value = min(max((value - 50) / 150, 0), 1)
                     track_features.append(value)
                 else:
-                    # Use mean value for missing features
-                    track_features.append(0.5)
+                    # This should rarely happen now due to imputation
+                    # But keep as fallback
+                    track_features.append(self.audio_features_service.FEATURE_DEFAULTS.get(feature, 0.5))
             
             features_data.append(track_features)
         
@@ -69,22 +73,60 @@ class ClusteringService:
         
         return normalized_features
     
+    async def prepare_tracks_for_analysis(
+        self, 
+        tracks: List[Track], 
+        db: Optional[Session] = None
+    ) -> Tuple[List[Track], Dict[str, Any]]:
+        """
+        Prepare tracks for clustering analysis by handling missing audio features.
+        
+        Args:
+            tracks: List of Track objects
+            db: Database session for updating tracks (optional)
+            
+        Returns:
+            Tuple[List[Track], Dict[str, Any]]: Prepared tracks and quality report
+        """
+        # Analyze initial data quality
+        initial_quality = self.audio_features_service.analyze_data_quality(tracks)
+        
+        # Try to fetch missing features from Spotify API if database session provided
+        if db is not None and initial_quality["overall_completeness"] < 0.9:
+            tracks = await self.audio_features_service.fetch_missing_audio_features(tracks, db)
+        
+        # Impute remaining missing features
+        tracks = self.audio_features_service.impute_missing_features(tracks)
+        
+        # Analyze final data quality
+        final_quality = self.audio_features_service.analyze_data_quality(tracks)
+        
+        quality_report = {
+            "initial_quality": initial_quality,
+            "final_quality": final_quality,
+            "improvement": final_quality["overall_completeness"] - initial_quality["overall_completeness"]
+        }
+        
+        return tracks, quality_report
+    
     def cluster_tracks(
         self, 
         tracks: List[Track], 
         method: str = "kmeans", 
-        n_clusters: int = 3
-    ) -> Tuple[List[ClusterData], float]:
+        n_clusters: int = 3,
+        quality_report: Optional[Dict[str, Any]] = None
+    ) -> Tuple[List[ClusterData], float, Dict[str, Any]]:
         """
         Perform clustering analysis on tracks using specified method.
         
         Args:
-            tracks: List of Track objects to cluster
+            tracks: List of Track objects to cluster (should be pre-processed)
             method: Clustering method ("kmeans" or "dbscan")
             n_clusters: Number of clusters for k-means
+            quality_report: Optional data quality report from preparation
             
         Returns:
-            Tuple[List[ClusterData], float]: Cluster data and silhouette score
+            Tuple[List[ClusterData], float, Dict[str, Any]]: Cluster data, silhouette score, and analysis metadata
             
         Raises:
             ValueError: If invalid method or insufficient data
@@ -149,7 +191,17 @@ class ClusteringService:
         # Sort clusters by size (descending)
         clusters.sort(key=lambda x: x.track_count, reverse=True)
         
-        return clusters, silhouette_avg
+        # Create analysis metadata
+        analysis_metadata = {
+            "method": method,
+            "n_clusters_requested": n_clusters,
+            "n_clusters_found": len(clusters),
+            "silhouette_score": silhouette_avg,
+            "total_tracks": len(tracks),
+            "data_quality": quality_report
+        }
+        
+        return clusters, silhouette_avg, analysis_metadata
     
     def calculate_playlist_stats(self, tracks: List[Track]) -> PlaylistStats:
         """
@@ -252,26 +304,22 @@ class ClusteringService:
         for cluster in cluster_objects:
             if cluster.track_count >= 3:
                 cluster_tracks = [track_dict[track_id] for track_id in cluster.track_ids if track_id in track_dict]
-                energy_values = [track.energy for track in cluster_tracks if track.energy is not None]
+                avg_energy = statistics.mean([track.energy for track in cluster_tracks if track.energy is not None])
                 
-                # Only proceed if we have valid energy values
-                if energy_values:
-                    avg_energy = statistics.mean(energy_values)
-                    
-                    if avg_energy > 0.8:
-                        suggestions.append(OptimizationSuggestion(
-                            suggestion_type="energy_balance",
-                            description=f"High-energy cluster detected. Consider interspersing with lower-energy tracks for better flow.",
-                            affected_tracks=cluster.track_ids,
-                            confidence_score=0.6
-                        ))
-                    elif avg_energy < 0.3:
-                        suggestions.append(OptimizationSuggestion(
-                            suggestion_type="energy_balance",
-                            description=f"Low-energy cluster detected. Consider adding some higher-energy tracks for variety.",
-                            affected_tracks=cluster.track_ids,
-                            confidence_score=0.6
-                        ))
+                if avg_energy > 0.8:
+                    suggestions.append(OptimizationSuggestion(
+                        suggestion_type="energy_balance",
+                        description=f"High-energy cluster detected. Consider interspersing with lower-energy tracks for better flow.",
+                        affected_tracks=cluster.track_ids,
+                        confidence_score=0.6
+                    ))
+                elif avg_energy < 0.3:
+                    suggestions.append(OptimizationSuggestion(
+                        suggestion_type="energy_balance",
+                        description=f"Low-energy cluster detected. Consider adding some higher-energy tracks for variety.",
+                        affected_tracks=cluster.track_ids,
+                        confidence_score=0.6
+                    ))
         
         # Suggestion 4: Valence (mood) diversity
         valences = [track.valence for track in tracks if track.valence is not None]

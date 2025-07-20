@@ -95,11 +95,19 @@ class ClusterData(BaseModel):
     center_features: Dict[str, float]
     track_ids: List[int]
 
+class DataQualityReport(BaseModel):
+    """Schema for data quality analysis."""
+    total_tracks: int
+    overall_completeness: float
+    feature_quality: Dict[str, Dict[str, Any]]
+    recommendation: str
+
 class AnalysisRequest(BaseModel):
     """Schema for playlist analysis request."""
     playlist_id: int
     cluster_method: str = Field(default="kmeans", pattern="^(kmeans|dbscan)$")
     cluster_count: Optional[int] = Field(default=3, ge=2, le=10)
+    fetch_missing_features: bool = Field(default=True, description="Whether to attempt fetching missing audio features from Spotify")
 
 class AnalysisResponse(BaseModel):
     """Schema for playlist analysis response."""
@@ -109,6 +117,8 @@ class AnalysisResponse(BaseModel):
     cluster_method: str
     silhouette_score: Optional[float] = None
     clusters: List[ClusterData]
+    data_quality: Optional[DataQualityReport] = None
+    analysis_metadata: Optional[Dict[str, Any]] = None
     created_at: datetime
     
     class Config:

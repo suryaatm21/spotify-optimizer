@@ -13,7 +13,7 @@ from backend.dependencies import get_database
 from backend.models import Base, User, Playlist, Track
 
 # Test database configuration
-TEST_DATABASE_URL = "sqlite:///./test_spotify_optimizer.db"
+TEST_DATABASE_URL = "sqlite:///./db/test_spotify_optimizer.db"
 
 engine = create_engine(
     TEST_DATABASE_URL,

@@ -14,13 +14,18 @@ import httpx
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
-from .models import User
+from backend.models import User
+from pathlib import Path
 
 # Load environment variables
 load_dotenv()
 
-# Database configuration
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./spotify.db")
+# --- Database Configuration ---
+# Build a robust path to the database file in the `db/` directory
+# This ensures the path is correct regardless of the script's working directory.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DB_PATH = PROJECT_ROOT / "db" / "spotify.db"
+DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DB_PATH}")
 
 engine = create_engine(
     DATABASE_URL,

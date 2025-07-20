@@ -39,16 +39,27 @@ spotify-optimizer/
 │   ├── models.py              # SQLAlchemy database models
 │   ├── schemas.py             # Pydantic data schemas
 │   ├── dependencies.py        # Database and auth dependencies
+│   ├── create_db.py           # Database initialization script
 │   ├── routers/
 │   │   ├── auth.py           # Authentication endpoints
 │   │   └── analytics.py      # Playlist analysis endpoints
 │   ├── services/
-│   │   └── clustering.py     # Machine learning clustering service
+│   │   ├── clustering.py     # Machine learning clustering service
+│   │   └── audio_features.py # Audio features data quality service
 │   ├── tests/
 │   │   ├── conftest.py       # Pytest configuration and fixtures
-│   │   └── test_clustering.py # Clustering service tests
+│   │   ├── test_clustering.py # Clustering service tests
+│   │   └── test_audio_features.py # Audio features service tests
 │   ├── requirements.txt       # Python dependencies
 │   └── .env.example          # Environment variables template
+├── db/
+│   ├── spotify.db            # Main application database
+│   ├── check_db.py           # Database inspection utility
+│   ├── monitor_oauth.py      # OAuth flow monitoring utility
+│   └── debug_oauth_flow.py   # OAuth debugging utility
+├── tests/
+│   ├── test_auth_flow.py     # Integration tests for authentication
+│   └── direct_oauth_test.py  # Direct OAuth testing utility
 ├── frontend/
 │   ├── pages/
 │   │   ├── index.tsx         # Dashboard page
@@ -74,6 +85,8 @@ spotify-optimizer/
 │   ├── next.config.js       # Next.js configuration
 │   ├── tailwind.config.js   # Tailwind CSS configuration
 │   └── tsconfig.json        # TypeScript configuration
+├── docs/
+│   └── refactor-summary.md  # Documentation of project refactor
 └── README.md               # Project documentation
 ```
 
@@ -114,8 +127,20 @@ spotify-optimizer/
    # Edit .env with your Spotify API credentials
    ```
 
-5. **Run the development server:**
+5. **Initialize the database:**
    ```bash
+   python create_db.py
+   ```
+
+6. **Navigate back to the root directory and run the development server:**
+   ```bash
+   cd ..
+   uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+   ```
+   
+   Alternatively, you can run from the backend directory:
+   ```bash
+   cd backend
    python main.py
    ```
 
@@ -163,7 +188,8 @@ The frontend will be available at `http://localhost:3000`
 - `GET /api/analytics/playlists` - Get user playlists
 - `GET /api/analytics/playlists/{id}/tracks` - Get playlist tracks
 - `GET /api/analytics/playlists/{id}/stats` - Get playlist statistics
-- `POST /api/analytics/playlists/{id}/analyze` - Analyze playlist with clustering
+- `GET /api/analytics/playlists/{id}/data-quality` - Check audio features data quality
+- `POST /api/analytics/playlists/{id}/analyze` - Analyze playlist with clustering (includes data quality improvements)
 - `GET /api/analytics/playlists/{id}/optimize` - Get optimization suggestions
 
 ## Features
@@ -174,6 +200,11 @@ The frontend will be available at `http://localhost:3000`
 - **DBSCAN Clustering**: Identifies clusters of varying densities
 - **PCA Visualization**: 2D projection of high-dimensional audio features
 - **Silhouette Analysis**: Measures clustering quality
+- **Data Quality Management**: Intelligent handling of missing audio features
+  - Automatic fetching of missing features from Spotify API
+  - KNN-based imputation for remaining missing values
+  - Statistical fallbacks and quality reporting
+- **Improved Analysis Accuracy**: Enhanced clustering reliability through better data preparation
 
 ### Audio Features Analyzed
 

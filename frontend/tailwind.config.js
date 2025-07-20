@@ -22,8 +22,8 @@ module.exports = {
             700: '#282828',
             800: '#181818',
             900: '#121212',
-          }
-        }
+          },
+        },
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],
@@ -50,4 +50,4 @@ module.exports = {
     },
   },
   plugins: [],
-}
+};

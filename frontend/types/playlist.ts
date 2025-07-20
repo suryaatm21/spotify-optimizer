@@ -33,7 +33,7 @@ export interface ITrack {
   popularity?: number;
   playlist_id: number;
   created_at: string;
-  
+
   // Audio features
   danceability?: number;
   energy?: number;
@@ -70,11 +70,14 @@ export interface IPlaylistStats {
   avg_duration_ms: number;
   avg_popularity: number;
   avg_audio_features: Record<string, number>;
-  feature_ranges: Record<string, {
-    min: number;
-    max: number;
-    std: number;
-  }>;
+  feature_ranges: Record<
+    string,
+    {
+      min: number;
+      max: number;
+      std: number;
+    }
+  >;
 }
 
 export interface IOptimizationSuggestion {

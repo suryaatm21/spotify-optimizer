@@ -9,9 +9,9 @@ import httpx
 import urllib.parse
 from datetime import datetime, timedelta
 
-from ..dependencies import get_database, create_access_token, get_current_user, get_spotify_client_credentials
-from ..models import User
-from ..schemas import AuthCallbackRequest, TokenResponse, UserResponse
+from backend.dependencies import get_database, create_access_token, get_current_user, get_spotify_client_credentials
+from backend.models import User
+from backend.schemas import AuthCallbackRequest, TokenResponse, UserResponse
 
 router = APIRouter()
 

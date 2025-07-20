@@ -7,13 +7,13 @@ from sqlalchemy.orm import Session
 import httpx
 import json
 
-from ..dependencies import get_database, get_current_user
-from ..models import User, Playlist, Track, PlaylistAnalysis
-from ..schemas import (
+from backend.dependencies import get_database, get_current_user
+from backend.models import User, Playlist, Track, PlaylistAnalysis
+from backend.schemas import (
     PlaylistResponse, TrackResponse, AnalysisRequest, AnalysisResponse,
-    PlaylistStats, OptimizationResponse
+    PlaylistStats, OptimizationResponse, DataQualityReport
 )
-from ..services.clustering import ClusteringService
+from backend.services.clustering import ClusteringService
 
 router = APIRouter()
 
@@ -225,7 +225,7 @@ async def analyze_playlist(
     db: Session = Depends(get_database)
 ):
     """
-    Analyze a playlist using machine learning clustering.
+    Analyze a playlist using machine learning clustering with improved data quality handling.
     
     Args:
         playlist_id: Database ID of the playlist
@@ -235,7 +235,7 @@ async def analyze_playlist(
         db: Database session
         
     Returns:
-        AnalysisResponse: Clustering analysis results
+        AnalysisResponse: Clustering analysis results with data quality information
         
     Raises:
         HTTPException: If playlist not found or insufficient tracks
@@ -263,12 +263,19 @@ async def analyze_playlist(
             detail=f"Playlist must have at least {analysis_request.cluster_count} tracks for clustering"
         )
     
-    # Perform clustering analysis
+    # Initialize clustering service
     clustering_service = ClusteringService()
-    clusters, silhouette_score = clustering_service.cluster_tracks(
-        tracks, 
+    
+    # Prepare tracks for analysis (handle missing features)
+    db_session = db if analysis_request.fetch_missing_features else None
+    prepared_tracks, quality_report = await clustering_service.prepare_tracks_for_analysis(tracks, db_session)
+    
+    # Perform clustering analysis
+    clusters, silhouette_score, analysis_metadata = clustering_service.cluster_tracks(
+        prepared_tracks, 
         method=analysis_request.cluster_method,
-        n_clusters=analysis_request.cluster_count
+        n_clusters=analysis_request.cluster_count,
+        quality_report=quality_report
     )
     
     # Store analysis results
@@ -280,12 +287,24 @@ async def analyze_playlist(
         cluster_count=analysis_request.cluster_count,
         cluster_method=analysis_request.cluster_method,
         silhouette_score=silhouette_score,
-        analysis_data=json.dumps(serializable_clusters)
+        analysis_data=json.dumps({
+            "clusters": serializable_clusters,
+            "metadata": analysis_metadata
+        })
     )
     
     db.add(analysis)
     db.commit()
     db.refresh(analysis)
+    
+    # Create data quality report for response
+    final_quality = quality_report.get("final_quality", {})
+    data_quality = DataQualityReport(
+        total_tracks=final_quality.get("total_tracks", len(tracks)),
+        overall_completeness=final_quality.get("overall_completeness", 0.0),
+        feature_quality=final_quality.get("feature_quality", {}),
+        recommendation=final_quality.get("recommendation", "No quality assessment available")
+    ) if final_quality else None
     
     return AnalysisResponse(
         id=analysis.id,
@@ -294,7 +313,58 @@ async def analyze_playlist(
         cluster_method=analysis_request.cluster_method,
         silhouette_score=silhouette_score,
         clusters=clusters,
+        data_quality=data_quality,
+        analysis_metadata=analysis_metadata,
         created_at=analysis.created_at
+    )
+
+@router.get("/playlists/{playlist_id}/data-quality", response_model=DataQualityReport)
+async def get_playlist_data_quality(
+    playlist_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_database)
+):
+    """
+    Analyze the data quality of a playlist's audio features.
+    
+    Args:
+        playlist_id: Database ID of the playlist
+        current_user: Current authenticated user
+        db: Database session
+        
+    Returns:
+        DataQualityReport: Data quality analysis
+        
+    Raises:
+        HTTPException: If playlist not found
+    """
+    # Verify playlist ownership
+    playlist = db.query(Playlist).filter(
+        Playlist.id == playlist_id,
+        Playlist.user_id == current_user.id
+    ).first()
+    
+    if not playlist:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Playlist not found"
+        )
+    
+    # Get tracks
+    tracks = db.query(Track).filter(Track.playlist_id == playlist_id).all()
+    if not tracks:
+        tracks = await _fetch_and_store_playlist_tracks(playlist, current_user, db)
+    
+    # Analyze data quality
+    from backend.services.audio_features import AudioFeaturesService
+    audio_service = AudioFeaturesService()
+    quality_analysis = audio_service.analyze_data_quality(tracks)
+    
+    return DataQualityReport(
+        total_tracks=quality_analysis["total_tracks"],
+        overall_completeness=quality_analysis["overall_completeness"],
+        feature_quality=quality_analysis["feature_quality"],
+        recommendation=quality_analysis["recommendation"]
     )
 
 @router.get("/playlists/{playlist_id}/stats", response_model=PlaylistStats)

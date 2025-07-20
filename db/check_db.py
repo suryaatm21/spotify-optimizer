@@ -10,7 +10,7 @@ def check_database():
     """
     Check if the SQLite database exists and inspect its schema.
     """
-    db_path = "backend/spotify.db"
+    db_path = "db/spotify.db"
     
     print(f"Checking database at: {os.path.abspath(db_path)}")
     
