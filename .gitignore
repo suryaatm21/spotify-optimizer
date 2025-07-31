@@ -146,3 +146,4 @@ temp/
 # Instructions
 .windsurf/rules
 .github/
+tests/
