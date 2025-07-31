@@ -28,9 +28,9 @@ class AudioFeaturesService:
         "liveness": 0.2, "valence": 0.5, "tempo": 120.0
     }
 
-    def __init__(self, reccobeats_service: ReccoBeatsService):
+    def __init__(self):
         """Initializes the service with its dependencies and ML models."""
-        self.reccobeats_service = reccobeats_service
+        self.reccobeats_service = ReccoBeatsService()
         self.imputer = KNNImputer(n_neighbors=5, weights="distance")
         self.scaler = StandardScaler()
 
@@ -57,7 +57,13 @@ class AudioFeaturesService:
             print("✅ All tracks have complete audio features.")
             return tracks
 
-        await self._fetch_from_reccobeats(tracks_to_process)
+        # Process tracks in batches of 40 to respect ReccoBeats API limits
+        batch_size = 40
+        for i in range(0, len(tracks_to_process), batch_size):
+            batch = tracks_to_process[i:i + batch_size]
+            await self._fetch_from_reccobeats(batch)
+            print(f"Processed batch {i//batch_size + 1}/{(len(tracks_to_process) + batch_size - 1)//batch_size}")
+        
         self.impute_missing_features(tracks_to_process)
 
         # The caller is responsible for the database session commit.
