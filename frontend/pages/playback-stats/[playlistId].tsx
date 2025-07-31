@@ -63,15 +63,16 @@ export default function PlaylistStats() {
     fetcher,
   );
 
-  // Fetch optimization suggestions
-  const {
-    data: optimizations,
-    error: optimizationsError,
-    mutate: refreshOptimizations,
-  } = useSWR<{ suggestions: IOptimizationSuggestion[] }>(
-    playlistId ? `/api/analytics/playlists/${playlistId}/optimize` : null,
-    fetcher,
-  );
+  // Fetch optimization suggestions - DISABLED to prevent 501 errors from disabled endpoint
+  // const {
+  //   data: optimizations,
+  //   error: optimizationsError,
+  //   mutate: refreshOptimizations,
+  // } = useSWR<{ suggestions: IOptimizationSuggestion[] }>(
+  //   playlistId ? `/api/analytics/playlists/${playlistId}/optimize` : null,
+  //   fetcher,
+  // );
+  const optimizations = null; // Placeholder to prevent UI errors
 
   const [analysisResult, setAnalysisResult] = useState<IAnalysisResult | null>(
     null,
@@ -104,7 +105,6 @@ export default function PlaylistStats() {
 
       const result = await response.json();
       setAnalysisResult(result);
-      refreshOptimizations();
     } catch (error) {
       console.error('Analysis error:', error);
     } finally {
@@ -234,13 +234,10 @@ export default function PlaylistStats() {
 
                   <button
                     onClick={handleAnalyzePlaylist}
-                    disabled={isAnalyzing || !tracks || tracks.length < 2}
-                    className="flex items-center space-x-2 px-4 py-2 bg-spotify-green hover:bg-spotify-green/90 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-colors">
-                    {isAnalyzing ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <BarChart3 className="h-4 w-4" />
-                    )}
+                    disabled={isAnalyzing}
+                    className="flex items-center gap-2 bg-spotify-green hover:bg-spotify-green/90 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-2 px-4 rounded-lg transition-colors"
+                  >
+                    {isAnalyzing ? <Loader2 className="animate-spin" size={16} /> : <RefreshCw size={16} />}
                     <span>
                       {isAnalyzing ? 'Analyzing...' : 'Analyze Playlist'}
                     </span>
@@ -319,12 +316,13 @@ export default function PlaylistStats() {
 
             {/* Right Column - Optimization Suggestions */}
             <div className="space-y-8">
-              {optimizations && (
+              {/* Optimization panel disabled - endpoint temporarily unavailable */}
+              {/* {optimizations && (
                 <OptimizationPanel
                   suggestions={optimizations.suggestions}
                   onRefresh={refreshOptimizations}
                 />
-              )}
+              )} */}
             </div>
           </div>
 

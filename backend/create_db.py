@@ -17,8 +17,15 @@ def create_database():
     DB_PATH = PROJECT_ROOT / "db" / "spotify.db"
     DB_PATH.parent.mkdir(exist_ok=True)  # Ensure the db/ directory exists
 
+    # --- Start: Force clean database creation ---
+    # Delete the old database file if it exists to ensure a fresh start.
+    if DB_PATH.exists():
+        DB_PATH.unlink()
+        print(f"Removed existing database at: {DB_PATH}")
+    # --- End: Force clean database creation ---
+
     database_url = os.getenv("DATABASE_URL", f"sqlite:///{DB_PATH}")
-    print(f"Creating database at: {DB_PATH}")
+    print(f"Creating database at URL: {database_url}")
 
     # Create engine
     engine = create_engine(database_url)
@@ -26,8 +33,8 @@ def create_database():
     # Create all tables
     Base.metadata.create_all(bind=engine)
     
+    print("All tables to be created:", Base.metadata.tables.keys())
     print("Database tables created successfully!")
-    print(f"Tables created: {', '.join(Base.metadata.tables.keys())}")
 
 if __name__ == "__main__":
     create_database()

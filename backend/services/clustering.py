@@ -11,9 +11,9 @@ from sklearn.metrics import silhouette_score
 import statistics
 from sqlalchemy.orm import Session
 
-from backend.models import Track
-from backend.schemas import ClusterData, PlaylistStats, OptimizationSuggestion
-from backend.services.audio_features import AudioFeaturesService
+from backend.models import Track, PlaylistAnalysis
+from ..schemas import ClusterData, PlaylistStats, OptimizationSuggestion
+from .audio_features import AudioFeaturesService
 
 class ClusteringService:
     """
@@ -26,11 +26,11 @@ class ClusteringService:
         "instrumentalness", "liveness", "valence", "tempo"
     ]
     
-    def __init__(self):
-        """Initialize the clustering service with default configuration."""
+    def __init__(self, audio_features_service: AudioFeaturesService):
+        """Initialize the clustering service with its dependencies."""
         self.scaler = StandardScaler()
         self.pca = PCA(n_components=2)  # For visualization
-        self.audio_features_service = AudioFeaturesService()
+        self.audio_features_service = audio_features_service
     
     def _extract_features(self, tracks: List[Track]) -> np.ndarray:
         """
@@ -76,7 +76,8 @@ class ClusteringService:
     async def prepare_tracks_for_analysis(
         self, 
         tracks: List[Track], 
-        db: Optional[Session] = None
+        db: Optional[Session] = None,
+        user_access_token: Optional[str] = None
     ) -> Tuple[List[Track], Dict[str, Any]]:
         """
         Prepare tracks for clustering analysis by handling missing audio features.
@@ -84,6 +85,7 @@ class ClusteringService:
         Args:
             tracks: List of Track objects
             db: Database session for updating tracks (optional)
+            user_access_token: User's Spotify access token for API calls (optional)
             
         Returns:
             Tuple[List[Track], Dict[str, Any]]: Prepared tracks and quality report
@@ -91,12 +93,14 @@ class ClusteringService:
         # Analyze initial data quality
         initial_quality = self.audio_features_service.analyze_data_quality(tracks)
         
-        # Try to fetch missing features from Spotify API if database session provided
+        # Try to fetch missing features from ReccoBeats API if database session provided
         if db is not None and initial_quality["overall_completeness"] < 0.9:
-            tracks = await self.audio_features_service.fetch_missing_audio_features(tracks, db)
-        
-        # Impute remaining missing features
-        tracks = self.audio_features_service.impute_missing_features(tracks)
+            tracks = await self.audio_features_service.fetch_and_impute_features(
+                tracks, db
+            )
+        else:
+            # If no database session, just impute missing features
+            self.audio_features_service.impute_missing_features(tracks)
         
         # Analyze final data quality
         final_quality = self.audio_features_service.analyze_data_quality(tracks)
@@ -272,7 +276,8 @@ class ClusteringService:
         suggestions = []
         
         # Convert clusters to ClusterData objects if needed
-        if clusters and isinstance(clusters[0], dict):
+        cluster_list = clusters.get("clusters", [])
+        if cluster_list and isinstance(cluster_list[0], dict):
             cluster_objects = [ClusterData(**cluster) for cluster in clusters]
         else:
             cluster_objects = clusters

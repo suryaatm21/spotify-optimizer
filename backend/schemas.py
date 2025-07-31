@@ -119,6 +119,7 @@ class AnalysisResponse(BaseModel):
     clusters: List[ClusterData]
     data_quality: Optional[DataQualityReport] = None
     analysis_metadata: Optional[Dict[str, Any]] = None
+    pca_coordinates: Optional[List[Dict[str, Any]]] = None
     created_at: datetime
     
     class Config:

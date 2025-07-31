@@ -19,6 +19,7 @@ router = APIRouter()
 REQUIRED_SCOPES = " ".join([
     "user-read-private",
     "playlist-read-private",
+    "playlist-read-collaborative",  # Added: Required for collaborative playlists
     "playlist-modify-public",
     "playlist-modify-private",
     "user-library-read",

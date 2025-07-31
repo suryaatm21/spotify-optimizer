@@ -55,11 +55,12 @@ class Track(Base):
     __tablename__ = "tracks"
     
     id = Column(Integer, primary_key=True, index=True)
-    spotify_track_id = Column(String(255), unique=True, index=True, nullable=False)
+    spotify_track_id = Column(String(255), index=True, nullable=False)
     name = Column(String(255), nullable=False)
     artist = Column(String(255), nullable=False)
     album = Column(String(255), nullable=True)
     duration_ms = Column(Integer, nullable=True)
+    features_imputed = Column(Boolean, default=False)  # True if audio features are based on imputation
     popularity = Column(Integer, nullable=True)
     
     # Audio features

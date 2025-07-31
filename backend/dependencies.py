@@ -129,7 +129,7 @@ def get_current_user(
     user = db.query(User).filter(User.spotify_user_id == spotify_user_id).first()
     if user is None:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
+            status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found",
             headers={"WWW-Authenticate": "Bearer"},
         )
@@ -194,7 +194,7 @@ def get_current_user(
                 headers={"WWW-Authenticate": "Bearer"},
             )
     else:
-        print(f"DEBUG: Access token for user {user.spotify_user_id} is still valid")
+        pass
     
     return user
 
@@ -223,3 +223,42 @@ def get_spotify_client_credentials() -> dict:
         "client_secret": client_secret,
         "redirect_uri": redirect_uri
     }
+
+async def get_spotify_client_credentials_async() -> dict:
+    """
+    Async version of get_spotify_client_credentials for use in async contexts.
+    
+    Returns:
+        dict: Dictionary containing client_id, client_secret, and redirect_uri
+        
+    Raises:
+        HTTPException: If credentials are not configured
+    """
+    return get_spotify_client_credentials()
+
+# --- Service Dependencies ---
+from backend.services.reccobeats import ReccoBeatsService
+from backend.services.audio_features import AudioFeaturesService
+from backend.services.clustering import ClusteringService
+
+def get_reccobeats_service() -> ReccoBeatsService:
+    """
+    Dependency provider for ReccoBeatsService.
+    """
+    return ReccoBeatsService()
+
+def get_audio_features_service(
+    reccobeats_service: ReccoBeatsService = Depends(get_reccobeats_service),
+) -> AudioFeaturesService:
+    """
+    Dependency provider for AudioFeaturesService.
+    """
+    return AudioFeaturesService(reccobeats_service=reccobeats_service)
+
+def get_clustering_service(
+    audio_features_service: AudioFeaturesService = Depends(get_audio_features_service),
+) -> ClusteringService:
+    """
+    Dependency provider for ClusteringService.
+    """
+    return ClusteringService(audio_features_service=audio_features_service)

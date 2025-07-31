@@ -142,3 +142,7 @@ dist
 # Temporary folders
 tmp/
 temp/
+
+# Instructions
+.windsurf/rules
+.github/

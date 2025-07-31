@@ -128,17 +128,20 @@ spotify-optimizer/
    ```
 
 5. **Initialize the database:**
+
    ```bash
    python create_db.py
    ```
 
 6. **Navigate back to the root directory and run the development server:**
+
    ```bash
    cd ..
    uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
    ```
-   
+
    Alternatively, you can run from the backend directory:
+
    ```bash
    cd backend
    python main.py
