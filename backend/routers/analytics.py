@@ -195,19 +195,35 @@ async def get_user_playlists(
 @router.get("/playlists/{playlist_id}/tracks", response_model=List[TrackResponse])
 async def get_playlist_tracks(
     playlist_id: int,
+    refresh: bool = False,  # Add refresh parameter
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_database),
     audio_features_service: AudioFeaturesService = Depends(get_audio_features_service)
 ):
     """
     Get all tracks for a specific playlist with audio features.
+    Use refresh=true to force re-fetch from Spotify and update cached data.
     """
     playlist = db.query(Playlist).filter(Playlist.id == playlist_id, Playlist.user_id == current_user.id).first()
     if not playlist:
         raise HTTPException(status_code=404, detail="Playlist not found")
 
     tracks = db.query(Track).filter(Track.playlist_id == playlist_id).all()
-    if not tracks:
+    
+    # Check if we need to refresh the tracks
+    should_refresh = (
+        refresh or  # Explicit refresh requested
+        not tracks or  # No tracks cached
+        len(tracks) < playlist.total_tracks  # Cached tracks less than Spotify reports
+    )
+    
+    if should_refresh:
+        # If refreshing, delete existing tracks for this playlist first
+        if refresh and tracks:
+            for track in tracks:
+                db.delete(track)
+            db.commit()
+            
         tracks = await _fetch_and_store_playlist_tracks(
             playlist=playlist,
             current_user=current_user,
@@ -216,6 +232,51 @@ async def get_playlist_tracks(
         )
         
     return tracks
+
+@router.post("/playlists/{playlist_id}/refresh")
+async def refresh_playlist_tracks(
+    playlist_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_database),
+    audio_features_service: AudioFeaturesService = Depends(get_audio_features_service)
+):
+    """
+    Force refresh playlist tracks from Spotify, updating cached data.
+    Useful when playlist has been modified on Spotify.
+    """
+    playlist = db.query(Playlist).filter(Playlist.id == playlist_id, Playlist.user_id == current_user.id).first()
+    if not playlist:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+
+    # Get current track count before refresh
+    existing_tracks = db.query(Track).filter(Track.playlist_id == playlist_id).all()
+    old_count = len(existing_tracks)
+    
+    # Delete existing tracks for clean refresh
+    for track in existing_tracks:
+        db.delete(track)
+    db.commit()
+    
+    # Fetch fresh data from Spotify
+    new_tracks = await _fetch_and_store_playlist_tracks(
+        playlist=playlist,
+        current_user=current_user,
+        db=db,
+        audio_features_service=audio_features_service
+    )
+    
+    # Update playlist total_tracks count
+    playlist.total_tracks = len(new_tracks)
+    db.commit()
+    db.refresh(playlist)
+    
+    return {
+        "message": "Playlist refreshed successfully",
+        "playlist_id": playlist_id,
+        "old_track_count": old_count,
+        "new_track_count": len(new_tracks),
+        "tracks_added": len(new_tracks) - old_count
+    }
 
 @router.post("/playlists/{playlist_id}/analyze", response_model=AnalysisResponse)
 async def analyze_playlist(
