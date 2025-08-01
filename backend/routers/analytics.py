@@ -36,19 +36,40 @@ async def _fetch_and_store_playlist_tracks(
         access_token = current_user.access_token
         headers = {"Authorization": f"Bearer {access_token}"}
 
-        tracks_response = await client.get(
-            f"https://api.spotify.com/v1/playlists/{playlist.spotify_playlist_id}/tracks",
-            headers=headers,
-            params={"limit": 100, "fields": "items(track(id,name,artists,album,duration_ms,popularity))"}
-        )
-
-        if tracks_response.status_code != 200:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Failed to fetch tracks from Spotify: {tracks_response.text}"
+        # Fetch all tracks using pagination
+        all_tracks_items = []
+        offset = 0
+        limit = 100
+        
+        while True:
+            tracks_response = await client.get(
+                f"https://api.spotify.com/v1/playlists/{playlist.spotify_playlist_id}/tracks",
+                headers=headers,
+                params={
+                    "limit": limit, 
+                    "offset": offset,
+                    "fields": "items(track(id,name,artists,album,duration_ms,popularity)),next"
+                }
             )
 
-        tracks_data = tracks_response.json()
+            if tracks_response.status_code != 200:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Failed to fetch tracks from Spotify: {tracks_response.text}"
+                )
+
+            batch_data = tracks_response.json()
+            items = batch_data.get("items", [])
+            all_tracks_items.extend(items)
+            
+            # Check if there are more tracks to fetch
+            if not batch_data.get("next") or len(items) < limit:
+                break
+                
+            offset += limit
+
+        # Create a tracks_data structure compatible with the existing code
+        tracks_data = {"items": all_tracks_items}
 
     # Store tracks in database
     new_tracks = []
@@ -114,15 +135,37 @@ async def get_user_playlists(
     """
     async with httpx.AsyncClient() as client:
         headers = {"Authorization": f"Bearer {current_user.access_token}"}
-        response = await client.get("https://api.spotify.com/v1/me/playlists", headers=headers)
-
-        if response.status_code != 200:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Failed to fetch playlists from Spotify: {response.text}"
+        
+        # Fetch all playlists using pagination
+        all_playlists_items = []
+        offset = 0
+        limit = 50  # Spotify's default limit for playlists
+        
+        while True:
+            response = await client.get(
+                "https://api.spotify.com/v1/me/playlists",
+                headers=headers,
+                params={"limit": limit, "offset": offset}
             )
 
-        playlists_data = response.json()
+            if response.status_code != 200:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Failed to fetch playlists from Spotify: {response.text}"
+                )
+
+            batch_data = response.json()
+            items = batch_data.get("items", [])
+            all_playlists_items.extend(items)
+            
+            # Check if there are more playlists to fetch
+            if not batch_data.get("next") or len(items) < limit:
+                break
+                
+            offset += limit
+
+        # Create playlists_data structure compatible with existing code
+        playlists_data = {"items": all_playlists_items}
         user_playlists = []
         for item in playlists_data.get("items", []):
             playlist = db.query(Playlist).filter_by(spotify_playlist_id=item["id"]).first()
