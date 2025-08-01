@@ -3,7 +3,7 @@ Main FastAPI application entry point.
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from backend.routers import auth, analytics, listening_analytics
+from backend.routers import auth, analytics, listening_analytics, optimization
 
 app = FastAPI(
     title="Spotify Playlist Optimizer API",
@@ -24,6 +24,7 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api/auth", tags=["authentication"])
 app.include_router(analytics.router, prefix="/api/analytics", tags=["analytics"])
 app.include_router(listening_analytics.router, prefix="/api", tags=["listening-analytics"])
+app.include_router(optimization.router, prefix="/api", tags=["playlist-optimization"])
 
 @app.get("/")
 async def root():
