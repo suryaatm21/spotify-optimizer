@@ -1,14 +1,18 @@
 """
-Clustering service for analyzing Spotify playlist audio features using machine learning.
+Enhanced clustering service for analyzing Spotify playlist audio features using machine learning.
+Implements advanced clustering algorithms, better normalization, and interpretable cluster labeling.
 """
 from typing import List, Dict, Any, Tuple, Optional
 import numpy as np
 import pandas as pd
 from sklearn.cluster import KMeans, DBSCAN
-from sklearn.preprocessing import StandardScaler
+from sklearn.mixture import GaussianMixture
+from sklearn.cluster import SpectralClustering
+from sklearn.preprocessing import StandardScaler, PowerTransformer
 from sklearn.decomposition import PCA
-from sklearn.metrics import silhouette_score
+from sklearn.metrics import silhouette_score, calinski_harabasz_score
 import statistics
+import logging
 from sqlalchemy.orm import Session
 
 from backend.models import Track, PlaylistAnalysis
@@ -17,49 +21,81 @@ from .audio_features import AudioFeaturesService
 
 class ClusteringService:
     """
-    Service for performing machine learning clustering analysis on Spotify tracks.
+    Enhanced service for performing machine learning clustering analysis on Spotify tracks.
+    Implements multiple clustering algorithms, smart preprocessing, and interpretable labels.
     """
     
-    # Audio features to use for clustering
+    # Audio features to use for clustering (expanded set)
     AUDIO_FEATURES = [
         "danceability", "energy", "speechiness", "acousticness",
-        "instrumentalness", "liveness", "valence", "tempo"
+        "instrumentalness", "liveness", "valence", "tempo", "loudness"
     ]
     
-    def __init__(self, audio_features_service: AudioFeaturesService):
-        """Initialize the clustering service with its dependencies."""
-        self.scaler = StandardScaler()
-        self.pca = PCA(n_components=2)  # For visualization
-        self.audio_features_service = audio_features_service
+    # Features that should be log-scaled before normalization
+    LOG_SCALE_FEATURES = ["tempo", "loudness"]
     
-    def _extract_features(self, tracks: List[Track]) -> np.ndarray:
+    # Feature weights for clustering (higher = more important)
+    FEATURE_WEIGHTS = {
+        "danceability": 1.2,
+        "energy": 1.2,
+        "valence": 1.1,
+        "acousticness": 1.0,
+        "instrumentalness": 0.9,
+        "speechiness": 0.8,
+        "liveness": 0.7,
+        "tempo": 1.0,
+        "loudness": 0.8
+    }
+    
+    def __init__(self, audio_features_service: AudioFeaturesService):
+        """Initialize the enhanced clustering service with its dependencies."""
+        self.scaler = StandardScaler()
+        self.power_transformer = PowerTransformer(method='yeo-johnson', standardize=False)
+        # Note: PCA instance is created fresh for each call to ensure deterministic behavior
+        self.audio_features_service = audio_features_service
+        self.logger = logging.getLogger(__name__)
+    
+    def _preprocess_features(self, tracks: List[Track]) -> Tuple[np.ndarray, Dict[str, Any]]:
         """
-        Extract audio features from tracks for clustering.
+        Enhanced feature preprocessing with log-scaling and smart normalization.
         
         Args:
             tracks: List of Track objects with audio features
             
         Returns:
-            np.ndarray: Normalized feature matrix
+            Tuple[np.ndarray, Dict[str, Any]]: Processed feature matrix and preprocessing metadata
             
         Raises:
             ValueError: If no valid features found
         """
         features_data = []
+        preprocessing_info = {
+            "log_scaled_features": [],
+            "feature_ranges": {},
+            "outlier_count": 0
+        }
         
         for track in tracks:
             track_features = []
             for feature in self.AUDIO_FEATURES:
                 value = getattr(track, feature)
                 if value is not None:
-                    # Normalize tempo to 0-1 range (typical range 50-200 BPM)
-                    if feature == "tempo":
-                        value = min(max((value - 50) / 150, 0), 1)
+                    # Apply log scaling for skewed features
+                    if feature in self.LOG_SCALE_FEATURES and value > 0:
+                        if feature == "tempo":
+                            # Tempo: log scale and normalize
+                            value = np.log(max(value, 1))  # Avoid log(0)
+                        elif feature == "loudness":
+                            # Loudness: shift to positive range then log scale
+                            value = np.log(max(value + 60, 1))  # Shift typical range [-60, 0] to [0, 60]
+                        if feature not in preprocessing_info["log_scaled_features"]:
+                            preprocessing_info["log_scaled_features"].append(feature)
+                    
                     track_features.append(value)
                 else:
-                    # This should rarely happen now due to imputation
-                    # But keep as fallback
-                    track_features.append(self.audio_features_service.FEATURE_DEFAULTS.get(feature, 0.5))
+                    # Fallback to defaults
+                    default_val = self.audio_features_service.FEATURE_DEFAULTS.get(feature, 0.5)
+                    track_features.append(default_val)
             
             features_data.append(track_features)
         
@@ -68,10 +104,203 @@ class ClusteringService:
         
         features_array = np.array(features_data)
         
-        # Normalize features using StandardScaler
-        normalized_features = self.scaler.fit_transform(features_array)
+        # Store feature ranges for interpretation
+        for i, feature in enumerate(self.AUDIO_FEATURES):
+            preprocessing_info["feature_ranges"][feature] = {
+                "min": float(np.min(features_array[:, i])),
+                "max": float(np.max(features_array[:, i])),
+                "mean": float(np.mean(features_array[:, i]))
+            }
         
-        return normalized_features
+        # Use deterministic preprocessing - skip PowerTransformer for consistency
+        # PowerTransformer can introduce randomness, use StandardScaler only
+        try:
+            # Create fresh scaler for deterministic behavior
+            scaler = StandardScaler()
+            normalized_features = scaler.fit_transform(features_array)
+        except Exception as e:
+            self.logger.warning(f"Scaling failed, using raw features: {e}")
+            normalized_features = features_array
+        
+        # Apply feature weights
+        for i, feature in enumerate(self.AUDIO_FEATURES):
+            weight = self.FEATURE_WEIGHTS.get(feature, 1.0)
+            normalized_features[:, i] *= weight
+        
+        # Detect outliers (optional: could be used for noise handling)
+        outlier_threshold = 3  # Standard deviations
+        outlier_mask = np.abs(normalized_features) > outlier_threshold
+        preprocessing_info["outlier_count"] = int(np.sum(outlier_mask))
+        
+        return normalized_features, preprocessing_info
+    
+    def _find_optimal_clusters(self, features: np.ndarray, max_clusters: int = 8) -> int:
+        """
+        Find optimal number of clusters using silhouette analysis.
+        
+        Args:
+            features: Normalized feature matrix
+            max_clusters: Maximum number of clusters to test
+            
+        Returns:
+            int: Optimal number of clusters
+        """
+        if len(features) < 4:
+            return min(len(features) - 1, 2)
+        
+        max_clusters = min(max_clusters, len(features) - 1)
+        silhouette_scores = []
+        
+        for k in range(2, max_clusters + 1):
+            try:
+                kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
+                cluster_labels = kmeans.fit_predict(features)
+                score = silhouette_score(features, cluster_labels)
+                silhouette_scores.append((k, score))
+            except Exception:
+                break
+        
+        if not silhouette_scores:
+            return 2
+        
+        # Find k with highest silhouette score
+        optimal_k = max(silhouette_scores, key=lambda x: x[1])[0]
+        return optimal_k
+    
+    def _apply_clustering_algorithm(
+        self, 
+        features: np.ndarray, 
+        method: str, 
+        n_clusters: Optional[int] = None
+    ) -> Tuple[np.ndarray, Dict[str, Any]]:
+        """
+        Apply the specified clustering algorithm with automatic parameter selection.
+        
+        Args:
+            features: Normalized feature matrix
+            method: Clustering method
+            n_clusters: Number of clusters (auto-detected if None)
+            
+        Returns:
+            Tuple[np.ndarray, Dict[str, Any]]: Cluster labels and algorithm metadata
+        """
+        algo_metadata = {"method": method}
+        
+        if method == "kmeans":
+            if n_clusters is None:
+                n_clusters = self._find_optimal_clusters(features)
+            algo_metadata["n_clusters"] = n_clusters
+            
+            clusterer = KMeans(
+                n_clusters=n_clusters, 
+                random_state=42, 
+                n_init="auto",
+                max_iter=300
+            )
+            cluster_labels = clusterer.fit_predict(features)
+            algo_metadata["inertia"] = float(clusterer.inertia_)
+            
+        elif method == "dbscan":
+            # Auto-tune DBSCAN parameters
+            from sklearn.neighbors import NearestNeighbors
+            neighbors = NearestNeighbors(n_neighbors=4)
+            neighbors_fit = neighbors.fit(features)
+            distances, indices = neighbors_fit.kneighbors(features)
+            distances = np.sort(distances[:, 3], axis=0)
+            
+            # Use elbow method to find optimal eps
+            eps = np.percentile(distances, 75)  # Use 75th percentile as eps
+            
+            clusterer = DBSCAN(eps=eps, min_samples=max(2, len(features) // 10))
+            cluster_labels = clusterer.fit_predict(features)
+            
+            algo_metadata["eps"] = float(eps)
+            algo_metadata["min_samples"] = clusterer.min_samples
+            algo_metadata["n_clusters"] = len(set(cluster_labels)) - (1 if -1 in cluster_labels else 0)
+            
+        elif method == "gaussian_mixture":
+            if n_clusters is None:
+                n_clusters = self._find_optimal_clusters(features)
+            algo_metadata["n_clusters"] = n_clusters
+            
+            clusterer = GaussianMixture(n_components=n_clusters, random_state=42)
+            clusterer.fit(features)
+            cluster_labels = clusterer.predict(features)
+            algo_metadata["aic"] = float(clusterer.aic(features))
+            algo_metadata["bic"] = float(clusterer.bic(features))
+            
+        elif method == "spectral":
+            if n_clusters is None:
+                n_clusters = self._find_optimal_clusters(features)
+            algo_metadata["n_clusters"] = n_clusters
+            
+            clusterer = SpectralClustering(
+                n_clusters=n_clusters, 
+                random_state=42,
+                affinity='rbf'
+            )
+            cluster_labels = clusterer.fit_predict(features)
+            
+        else:
+            raise ValueError(f"Unsupported clustering method: {method}")
+        
+        return cluster_labels, algo_metadata
+    
+    def _label_cluster(self, center_features: Dict[str, float]) -> str:
+        """
+        Generate an interpretable label for a cluster based on its center features.
+        
+        Args:
+            center_features: Dictionary of feature means for the cluster
+            
+        Returns:
+            str: Human-readable cluster label
+        """
+        energy = center_features.get("energy", 0.5)
+        valence = center_features.get("valence", 0.5)
+        danceability = center_features.get("danceability", 0.5)
+        acousticness = center_features.get("acousticness", 0.5)
+        instrumentalness = center_features.get("instrumentalness", 0.5)
+        tempo = center_features.get("tempo", 120)
+        
+        # High energy combinations
+        if energy > 0.7:
+            if valence > 0.7:
+                if danceability > 0.7:
+                    return "High-energy dance hits"
+                else:
+                    return "Upbeat & energetic"
+            elif valence < 0.4:
+                return "Intense & aggressive"
+            else:
+                return "High-energy tracks"
+        
+        # Low energy combinations
+        elif energy < 0.4:
+            if acousticness > 0.6:
+                if valence < 0.4:
+                    return "Mellow & melancholic"
+                else:
+                    return "Acoustic & chill"
+            elif valence < 0.4:
+                return "Sad & slow"
+            else:
+                return "Calm & relaxed"
+        
+        # Medium energy combinations
+        else:
+            if danceability > 0.7:
+                return "Moderate dance tracks"
+            elif acousticness > 0.6:
+                return "Folk & acoustic"
+            elif instrumentalness > 0.5:
+                return "Instrumental pieces"
+            elif valence > 0.7:
+                return "Feel-good tracks"
+            elif valence < 0.4:
+                return "Bittersweet songs"
+            else:
+                return "Balanced mix"
     
     async def prepare_tracks_for_analysis(
         self, 
@@ -117,16 +346,16 @@ class ClusteringService:
         self, 
         tracks: List[Track], 
         method: str = "kmeans", 
-        n_clusters: int = 3,
+        n_clusters: Optional[int] = None,
         quality_report: Optional[Dict[str, Any]] = None
     ) -> Tuple[List[ClusterData], float, Dict[str, Any]]:
         """
-        Perform clustering analysis on tracks using specified method.
+        Enhanced clustering analysis with automatic algorithm selection and interpretable labels.
         
         Args:
             tracks: List of Track objects to cluster (should be pre-processed)
-            method: Clustering method ("kmeans" or "dbscan")
-            n_clusters: Number of clusters for k-means
+            method: Clustering method ("kmeans", "dbscan", "gaussian_mixture", "spectral")
+            n_clusters: Number of clusters (auto-detected if None)
             quality_report: Optional data quality report from preparation
             
         Returns:
@@ -138,25 +367,22 @@ class ClusteringService:
         if len(tracks) < 2:
             raise ValueError("Need at least 2 tracks for clustering")
         
-        # Extract and normalize features
-        features = self._extract_features(tracks)
+        # Enhanced feature preprocessing
+        features, preprocessing_info = self._preprocess_features(tracks)
         
-        # Apply clustering algorithm
-        if method == "kmeans":
-            clusterer = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
-        elif method == "dbscan":
-            # Use DBSCAN with automatic cluster detection
-            clusterer = DBSCAN(eps=0.5, min_samples=2)
-        else:
-            raise ValueError(f"Unsupported clustering method: {method}")
+        # Apply clustering algorithm with automatic parameter selection
+        cluster_labels, algo_metadata = self._apply_clustering_algorithm(
+            features, method, n_clusters
+        )
         
-        cluster_labels = clusterer.fit_predict(features)
-        
-        # Calculate silhouette score
-        if len(set(cluster_labels)) > 1:
+        # Calculate clustering quality metrics
+        unique_labels = set(cluster_labels)
+        if len(unique_labels) > 1:
             silhouette_avg = silhouette_score(features, cluster_labels)
+            calinski_score = calinski_harabasz_score(features, cluster_labels)
         else:
             silhouette_avg = 0.0
+            calinski_score = 0.0
         
         # Group tracks by cluster
         clusters_dict = {}
@@ -165,29 +391,38 @@ class ClusteringService:
                 clusters_dict[label] = []
             clusters_dict[label].append((idx, tracks[idx]))
         
-        # Calculate cluster centers and create ClusterData objects
+        # Calculate cluster centers and create ClusterData objects with labels
         clusters = []
         for cluster_id, cluster_tracks in clusters_dict.items():
             track_indices = [idx for idx, _ in cluster_tracks]
             cluster_features = features[track_indices]
             
             # Calculate center features (mean of normalized features)
-            center_features = np.mean(cluster_features, axis=0)
+            center_features_norm = np.mean(cluster_features, axis=0)
             
-            # Convert back to original feature names
+            # Convert back to interpretable feature values
             center_dict = {}
             for i, feature in enumerate(self.AUDIO_FEATURES):
-                value = float(center_features[i])
-                # Denormalize tempo
-                if feature == "tempo":
-                    value = (value * 150) + 50
-                center_dict[feature] = value
+                # Reverse the preprocessing to get interpretable values
+                raw_value = float(center_features_norm[i])
+                
+                # Reverse feature weight
+                weight = self.FEATURE_WEIGHTS.get(feature, 1.0)
+                if weight != 0:
+                    raw_value /= weight
+                
+                # Store for interpretation (these are still somewhat normalized)
+                center_dict[feature] = raw_value
+            
+            # Generate interpretable label
+            cluster_label = self._label_cluster(center_dict)
             
             cluster_data = ClusterData(
                 cluster_id=int(cluster_id) if cluster_id >= 0 else -1,  # DBSCAN can have -1 (noise)
                 track_count=len(cluster_tracks),
                 center_features=center_dict,
-                track_ids=[track.id for _, track in cluster_tracks]
+                track_ids=[track.id for _, track in cluster_tracks],
+                label=cluster_label  # Add interpretable label
             )
             
             clusters.append(cluster_data)
@@ -195,13 +430,17 @@ class ClusteringService:
         # Sort clusters by size (descending)
         clusters.sort(key=lambda x: x.track_count, reverse=True)
         
-        # Create analysis metadata
+        # Create comprehensive analysis metadata
         analysis_metadata = {
-            "method": method,
-            "n_clusters_requested": n_clusters,
-            "n_clusters_found": len(clusters),
-            "silhouette_score": silhouette_avg,
-            "total_tracks": len(tracks),
+            "algorithm": algo_metadata,
+            "preprocessing": preprocessing_info,
+            "quality_metrics": {
+                "silhouette_score": float(silhouette_avg),
+                "calinski_harabasz_score": float(calinski_score),
+                "n_clusters": len(unique_labels),
+                "noise_points": int(sum(1 for label in cluster_labels if label == -1))
+            },
+            "feature_importance": dict(self.FEATURE_WEIGHTS),
             "data_quality": quality_report
         }
         
@@ -261,7 +500,7 @@ class ClusteringService:
     def generate_optimization_suggestions(
         self, 
         tracks: List[Track], 
-        clusters: List[Dict[str, Any]]
+        clusters: List[ClusterData]
     ) -> List[OptimizationSuggestion]:
         """
         Generate optimization suggestions based on clustering analysis.
@@ -275,16 +514,9 @@ class ClusteringService:
         """
         suggestions = []
         
-        # Convert clusters to ClusterData objects if needed
-        cluster_list = clusters.get("clusters", [])
-        if cluster_list and isinstance(cluster_list[0], dict):
-            cluster_objects = [ClusterData(**cluster) for cluster in clusters]
-        else:
-            cluster_objects = clusters
-        
         # Suggestion 1: Identify outlier clusters (very small clusters)
         total_tracks = len(tracks)
-        for cluster in cluster_objects:
+        for cluster in clusters:
             if cluster.track_count == 1:
                 suggestions.append(OptimizationSuggestion(
                     suggestion_type="outlier_removal",
@@ -294,8 +526,8 @@ class ClusteringService:
                 ))
         
         # Suggestion 2: Identify dominant cluster patterns
-        if cluster_objects:
-            largest_cluster = max(cluster_objects, key=lambda x: x.track_count)
+        if clusters:
+            largest_cluster = max(clusters, key=lambda x: x.track_count)
             if largest_cluster.track_count / total_tracks > 0.6:
                 suggestions.append(OptimizationSuggestion(
                     suggestion_type="theme_consistency",
@@ -304,55 +536,33 @@ class ClusteringService:
                     confidence_score=0.8
                 ))
         
-        # Suggestion 3: Energy flow optimization
+        # Suggestion 3: Energy flow optimization using cluster labels
         track_dict = {track.id: track for track in tracks}
-        for cluster in cluster_objects:
-            if cluster.track_count >= 3:
+        for cluster in clusters:
+            if cluster.track_count >= 3 and cluster.label:
                 cluster_tracks = [track_dict[track_id] for track_id in cluster.track_ids if track_id in track_dict]
                 avg_energy = statistics.mean([track.energy for track in cluster_tracks if track.energy is not None])
                 
-                if avg_energy > 0.8:
+                if "high-energy" in cluster.label.lower():
                     suggestions.append(OptimizationSuggestion(
                         suggestion_type="energy_balance",
-                        description=f"High-energy cluster detected. Consider interspersing with lower-energy tracks for better flow.",
+                        description=f"'{cluster.label}' cluster detected. Consider interspersing with calmer tracks for better flow.",
+                        affected_tracks=cluster.track_ids,
+                        confidence_score=0.7
+                    ))
+                elif "calm" in cluster.label.lower() or "mellow" in cluster.label.lower():
+                    suggestions.append(OptimizationSuggestion(
+                        suggestion_type="energy_balance",
+                        description=f"'{cluster.label}' cluster detected. Consider adding some energetic tracks for variety.",
                         affected_tracks=cluster.track_ids,
                         confidence_score=0.6
                     ))
-                elif avg_energy < 0.3:
-                    suggestions.append(OptimizationSuggestion(
-                        suggestion_type="energy_balance",
-                        description=f"Low-energy cluster detected. Consider adding some higher-energy tracks for variety.",
-                        affected_tracks=cluster.track_ids,
-                        confidence_score=0.6
-                    ))
-        
-        # Suggestion 4: Valence (mood) diversity
-        valences = [track.valence for track in tracks if track.valence is not None]
-        if valences:
-            valence_std = statistics.stdev(valences) if len(valences) > 1 else 0
-            avg_valence = statistics.mean(valences)
-            
-            if valence_std < 0.15:
-                suggestions.append(OptimizationSuggestion(
-                    suggestion_type="mood_diversity",
-                    description=f"Low mood diversity detected (std: {valence_std:.2f}). Consider adding tracks with different emotional tones.",
-                    affected_tracks=[track.id for track in tracks],
-                    confidence_score=0.5
-                ))
-            
-            if avg_valence < 0.3:
-                suggestions.append(OptimizationSuggestion(
-                    suggestion_type="mood_balance",
-                    description=f"Playlist skews toward negative valence (avg: {avg_valence:.2f}). Consider adding some uplifting tracks.",
-                    affected_tracks=[track.id for track in tracks],
-                    confidence_score=0.6
-                ))
         
         return suggestions[:5]  # Return top 5 suggestions
     
     def get_pca_coordinates(self, tracks: List[Track]) -> List[Dict[str, float]]:
         """
-        Get 2D PCA coordinates for visualization.
+        Get 2D PCA coordinates for visualization with enhanced preprocessing and deterministic behavior.
         
         Args:
             tracks: List of Track objects
@@ -363,17 +573,41 @@ class ClusteringService:
         if len(tracks) < 2:
             return []
         
-        features = self._extract_features(tracks)
-        pca_coords = self.pca.fit_transform(features)
+        features, _ = self._preprocess_features(tracks)
+        
+        # Create a fresh PCA instance with full SVD for maximum determinism
+        # Full SVD is more deterministic than randomized SVD
+        pca = PCA(n_components=2, svd_solver="full", random_state=42)
+        pca_coords = pca.fit_transform(features)
+        
+        # Ensure deterministic sign orientation for principal components to
+        # prevent sign flips between repeated executions. We flip each
+        # component so that the largest absolute loading is positive.
+        for i in range(pca.components_.shape[0]):
+            loading = pca.components_[i]
+            # Identify index of the loading with largest absolute magnitude
+            max_idx = np.argmax(np.abs(loading))
+            if loading[max_idx] < 0:
+                # Flip sign for this component axis
+                pca.components_[i] *= -1
+                pca_coords[:, i] *= -1
+        
+        # Additional determinism: ensure consistent ordering by sorting tracks by ID first
+        # This ensures the same input order for PCA
+        track_id_order = [(track.id, i, track) for i, track in enumerate(tracks)]
+        track_id_order.sort(key=lambda x: x[0])  # Sort by track ID
         
         coordinates = []
-        for i, track in enumerate(tracks):
+        for track_id, original_idx, track in track_id_order:
             coordinates.append({
                 "track_id": track.id,
-                "x": float(pca_coords[i][0]),
-                "y": float(pca_coords[i][1]),
+                "x": float(pca_coords[original_idx][0]),
+                "y": float(pca_coords[original_idx][1]),
                 "name": track.name,
                 "artist": track.artist
             })
+        
+        # Sort coordinates back by original track order for consistency
+        coordinates.sort(key=lambda x: next(i for i, t in enumerate(tracks) if t.id == x["track_id"]))
         
         return coordinates

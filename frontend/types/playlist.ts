@@ -53,6 +53,15 @@ export interface IClusterData {
   track_count: number;
   center_features: Record<string, number>;
   track_ids: number[];
+  label?: string; // Human-readable cluster label
+}
+
+export interface IPCACoordinate {
+  track_id: number;
+  x: number;
+  y: number;
+  name: string;
+  artist: string;
 }
 
 export interface IAnalysisResult {
@@ -62,6 +71,7 @@ export interface IAnalysisResult {
   cluster_method: string;
   silhouette_score?: number;
   clusters: IClusterData[];
+  pca_coordinates?: IPCACoordinate[];
   created_at: string;
 }
 

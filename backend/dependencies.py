@@ -247,13 +247,12 @@ def get_reccobeats_service() -> ReccoBeatsService:
     """
     return ReccoBeatsService()
 
-def get_audio_features_service(
-    reccobeats_service: ReccoBeatsService = Depends(get_reccobeats_service),
-) -> AudioFeaturesService:
+def get_audio_features_service() -> AudioFeaturesService:
     """
     Dependency provider for AudioFeaturesService.
+    AudioFeaturesService now manages its own ReccoBeatsService instance.
     """
-    return AudioFeaturesService(reccobeats_service=reccobeats_service)
+    return AudioFeaturesService()
 
 def get_clustering_service(
     audio_features_service: AudioFeaturesService = Depends(get_audio_features_service),
@@ -261,4 +260,4 @@ def get_clustering_service(
     """
     Dependency provider for ClusteringService.
     """
-    return ClusteringService(audio_features_service=audio_features_service)
+    return ClusteringService(audio_features_service)

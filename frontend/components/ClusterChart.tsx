@@ -12,11 +12,12 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts';
-import { IClusterData, ITrack } from '@/types/playlist';
+import { IClusterData, ITrack, IPCACoordinate } from '@/types/playlist';
 
 interface IClusterChartProps {
   clusters: IClusterData[];
   tracks: ITrack[];
+  pcaCoordinates?: IPCACoordinate[];
 }
 
 interface ScatterDataPoint {
@@ -28,45 +29,77 @@ interface ScatterDataPoint {
   trackId: number;
 }
 
-export default function ClusterChart({ clusters, tracks }: IClusterChartProps) {
-  // Generate mock PCA coordinates for visualization
-  // In a real implementation, these would come from the backend
+export default function ClusterChart({
+  clusters,
+  tracks,
+  pcaCoordinates,
+}: IClusterChartProps) {
+  // Generate scatter plot data using actual PCA coordinates when available
   const scatterData = useMemo(() => {
     const data: ScatterDataPoint[] = [];
     const trackMap = new Map(tracks.map((track) => [track.id, track]));
 
-    clusters.forEach((cluster, clusterIndex) => {
-      cluster.track_ids.forEach((trackId, trackIndex) => {
-        const track = trackMap.get(trackId);
+    if (pcaCoordinates && pcaCoordinates.length > 0) {
+      // Use actual PCA coordinates from backend
+      pcaCoordinates.forEach((coord) => {
+        const track = trackMap.get(coord.track_id);
         if (!track) return;
 
-        // Generate mock PCA coordinates based on audio features
-        const features = [
-          track.danceability || 0.5,
-          track.energy || 0.5,
-          track.valence || 0.5,
-          track.acousticness || 0.5,
-        ];
-
-        // Simple PCA simulation using weighted features
-        const x =
-          features[0] * 0.5 + features[1] * 0.3 + Math.random() * 0.3 - 0.15;
-        const y =
-          features[2] * 0.5 + features[3] * 0.3 + Math.random() * 0.3 - 0.15;
+        // Find which cluster this track belongs to
+        let clusterId = 0;
+        for (const cluster of clusters) {
+          if (cluster.track_ids.includes(coord.track_id)) {
+            clusterId = cluster.cluster_id;
+            break;
+          }
+        }
 
         data.push({
-          x: x * 10, // Scale for better visualization
-          y: y * 10,
-          name: track.name,
-          artist: track.artist,
-          cluster: cluster.cluster_id,
-          trackId: track.id,
+          x: coord.x,
+          y: coord.y,
+          name: coord.name,
+          artist: coord.artist,
+          cluster: clusterId,
+          trackId: coord.track_id,
         });
       });
-    });
+    } else {
+      // Fallback: generate deterministic coordinates based on audio features
+      clusters.forEach((cluster) => {
+        cluster.track_ids.forEach((trackId, trackIndex) => {
+          const track = trackMap.get(trackId);
+          if (!track) return;
+
+          // Generate deterministic coordinates based on audio features
+          // Using a seed based on track ID for consistency
+          const seed = trackId * 0.123456;
+          const features = [
+            track.danceability || 0.5,
+            track.energy || 0.5,
+            track.valence || 0.5,
+            track.acousticness || 0.5,
+          ];
+
+          // Deterministic PCA simulation using weighted features
+          const x =
+            features[0] * 0.5 + features[1] * 0.3 + Math.sin(seed) * 0.3;
+          const y =
+            features[2] * 0.5 + features[3] * 0.3 + Math.cos(seed) * 0.3;
+
+          data.push({
+            x: x * 10, // Scale for better visualization
+            y: y * 10,
+            name: track.name,
+            artist: track.artist,
+            cluster: cluster.cluster_id,
+            trackId: track.id,
+          });
+        });
+      });
+    }
 
     return data;
-  }, [clusters, tracks]);
+  }, [clusters, tracks, pcaCoordinates]);
 
   // Group data by cluster for different colors
   const clusterGroups = useMemo(() => {
@@ -96,12 +129,13 @@ export default function ClusterChart({ clusters, tracks }: IClusterChartProps) {
   const CustomTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
       const data = payload[0].payload;
+      const cluster = clusters.find((c) => c.cluster_id === data.cluster);
       return (
         <div className="bg-spotify-gray-800 border border-spotify-gray-600 rounded-lg p-3 shadow-lg">
           <p className="text-white font-medium">{data.name}</p>
           <p className="text-spotify-gray-300 text-sm">{data.artist}</p>
           <p className="text-spotify-gray-400 text-xs">
-            Cluster {data.cluster + 1}
+            {cluster?.label || `Cluster ${data.cluster + 1}`}
           </p>
           <p className="text-spotify-gray-400 text-xs">
             Position: ({data.x.toFixed(2)}, {data.y.toFixed(2)})
@@ -149,11 +183,15 @@ export default function ClusterChart({ clusters, tracks }: IClusterChartProps) {
           <Tooltip content={<CustomTooltip />} />
           <Legend
             wrapperStyle={{ color: '#9ca3af' }}
-            formatter={(value: string) => (
-              <span style={{ color: '#9ca3af' }}>
-                Cluster {parseInt(value) + 1}
-              </span>
-            )}
+            formatter={(value: string, entry: any) => {
+              const clusterId = parseInt(value);
+              const cluster = clusters.find((c) => c.cluster_id === clusterId);
+              return (
+                <span style={{ color: '#9ca3af' }}>
+                  {cluster?.label || `Cluster ${clusterId + 1}`}
+                </span>
+              );
+            }}
           />
 
           {Object.entries(clusterGroups).map(([clusterId, points]) => (
@@ -183,7 +221,8 @@ export default function ClusterChart({ clusters, tracks }: IClusterChartProps) {
               }}
             />
             <span className="text-spotify-gray-300 text-sm">
-              Cluster {cluster.cluster_id + 1} ({cluster.track_count} tracks)
+              {cluster.label || `Cluster ${cluster.cluster_id + 1}`} (
+              {cluster.track_count} tracks)
             </span>
           </div>
         ))}

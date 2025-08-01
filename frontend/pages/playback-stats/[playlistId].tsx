@@ -235,9 +235,12 @@ export default function PlaylistStats() {
                   <button
                     onClick={handleAnalyzePlaylist}
                     disabled={isAnalyzing}
-                    className="flex items-center gap-2 bg-spotify-green hover:bg-spotify-green/90 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-2 px-4 rounded-lg transition-colors"
-                  >
-                    {isAnalyzing ? <Loader2 className="animate-spin" size={16} /> : <RefreshCw size={16} />}
+                    className="flex items-center gap-2 bg-spotify-green hover:bg-spotify-green/90 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-2 px-4 rounded-lg transition-colors">
+                    {isAnalyzing ? (
+                      <Loader2 className="animate-spin" size={16} />
+                    ) : (
+                      <RefreshCw size={16} />
+                    )}
                     <span>
                       {isAnalyzing ? 'Analyzing...' : 'Analyze Playlist'}
                     </span>
@@ -309,6 +312,7 @@ export default function PlaylistStats() {
                   <ClusterChart
                     clusters={analysisResult.clusters}
                     tracks={tracks || []}
+                    pcaCoordinates={analysisResult.pca_coordinates}
                   />
                 </div>
               )}

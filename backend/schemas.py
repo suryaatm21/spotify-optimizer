@@ -89,11 +89,12 @@ class TrackResponse(TrackBase, AudioFeatures):
 
 # Analysis schemas
 class ClusterData(BaseModel):
-    """Schema for individual cluster data."""
+    """Schema for individual cluster data with interpretable labels."""
     cluster_id: int
     track_count: int
     center_features: Dict[str, float]
     track_ids: List[int]
+    label: Optional[str] = Field(default=None, description="Human-readable cluster label")
 
 class DataQualityReport(BaseModel):
     """Schema for data quality analysis."""
@@ -103,11 +104,23 @@ class DataQualityReport(BaseModel):
     recommendation: str
 
 class AnalysisRequest(BaseModel):
-    """Schema for playlist analysis request."""
+    """Schema for playlist analysis request with enhanced clustering options."""
     playlist_id: int
-    cluster_method: str = Field(default="kmeans", pattern="^(kmeans|dbscan)$")
-    cluster_count: Optional[int] = Field(default=3, ge=2, le=10)
-    fetch_missing_features: bool = Field(default=True, description="Whether to attempt fetching missing audio features from Spotify")
+    cluster_method: str = Field(
+        default="kmeans", 
+        pattern="^(kmeans|dbscan|gaussian_mixture|spectral)$",
+        description="Clustering algorithm: kmeans (balanced), dbscan (density-based), gaussian_mixture (probabilistic), spectral (non-linear)"
+    )
+    cluster_count: Optional[int] = Field(
+        default=None, 
+        ge=2, 
+        le=10, 
+        description="Number of clusters (auto-detected if not specified)"
+    )
+    fetch_missing_features: bool = Field(
+        default=True, 
+        description="Whether to attempt fetching missing audio features from ReccoBeats API"
+    )
 
 class AnalysisResponse(BaseModel):
     """Schema for playlist analysis response."""

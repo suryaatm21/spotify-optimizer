@@ -149,7 +149,8 @@ export default function StatsTable({
                     ? 'bg-spotify-green text-white'
                     : 'bg-spotify-gray-700 text-spotify-gray-300 hover:bg-spotify-gray-600'
                 }`}>
-                Cluster {cluster.cluster_id + 1} ({cluster.track_count})
+                {cluster.label || `Cluster ${cluster.cluster_id + 1}`} (
+                {cluster.track_count})
               </button>
             ))}
           </div>
