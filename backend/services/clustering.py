@@ -11,6 +11,7 @@ from sklearn.cluster import SpectralClustering
 from sklearn.preprocessing import StandardScaler, PowerTransformer
 from sklearn.decomposition import PCA
 from sklearn.metrics import silhouette_score, calinski_harabasz_score
+from kneed import KneeLocator
 import statistics
 import logging
 from sqlalchemy.orm import Session
@@ -136,7 +137,7 @@ class ClusteringService:
     
     def _find_optimal_clusters(self, features: np.ndarray, max_clusters: int = 8) -> int:
         """
-        Find optimal number of clusters using silhouette analysis.
+        Find optimal number of clusters using multiple evaluation metrics.
         
         Args:
             features: Normalized feature matrix
@@ -149,23 +150,154 @@ class ClusteringService:
             return min(len(features) - 1, 2)
         
         max_clusters = min(max_clusters, len(features) - 1)
-        silhouette_scores = []
+        
+        # Collect multiple metrics for cluster evaluation
+        evaluation_results = []
         
         for k in range(2, max_clusters + 1):
             try:
-                kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
-                cluster_labels = kmeans.fit_predict(features)
-                score = silhouette_score(features, cluster_labels)
-                silhouette_scores.append((k, score))
-            except Exception:
-                break
+                # Test with KMeans for consistency
+                kmeans = KMeans(n_clusters=k, random_state=42, n_init="auto")
+                labels = kmeans.fit_predict(features)
+                
+                # Skip if all points in one cluster
+                if len(set(labels)) < 2:
+                    continue
+                
+                # Calculate multiple evaluation metrics
+                silhouette_avg = silhouette_score(features, labels)
+                calinski_score = calinski_harabasz_score(features, labels)
+                
+                # Calculate within-cluster sum of squares (WCSS) for elbow method
+                wcss = kmeans.inertia_
+                
+                # Davies-Bouldin score (lower is better, so we'll invert it)
+                from sklearn.metrics import davies_bouldin_score
+                db_score = davies_bouldin_score(features, labels)
+                
+                evaluation_results.append({
+                    'k': k,
+                    'silhouette': silhouette_avg,
+                    'calinski_harabasz': calinski_score,
+                    'wcss': wcss,
+                    'davies_bouldin': db_score,
+                    'labels': labels
+                })
+                
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Clustering evaluation failed for k={k}: {e}")
+                continue
         
-        if not silhouette_scores:
+        if not evaluation_results:
             return 2
         
-        # Find k with highest silhouette score
-        optimal_k = max(silhouette_scores, key=lambda x: x[1])[0]
+        # Multi-criteria decision: combine multiple metrics
+        optimal_k = self._select_optimal_k_multi_criteria(evaluation_results)
         return optimal_k
+    
+    def _select_optimal_k_multi_criteria(self, evaluation_results: List[Dict]) -> int:
+        """
+        Select optimal k using multiple criteria and scoring.
+        
+        Args:
+            evaluation_results: List of evaluation metrics for different k values
+            
+        Returns:
+            int: Optimal number of clusters
+        """
+        if len(evaluation_results) == 1:
+            return evaluation_results[0]['k']
+        
+        # Normalize metrics to [0,1] for fair comparison
+        def normalize_metric(values, higher_is_better=True):
+            min_val, max_val = min(values), max(values)
+            if max_val == min_val:
+                return [0.5] * len(values)
+            
+            if higher_is_better:
+                return [(v - min_val) / (max_val - min_val) for v in values]
+            else:
+                return [(max_val - v) / (max_val - min_val) for v in values]
+        
+        # Extract metric values
+        k_values = [r['k'] for r in evaluation_results]
+        silhouette_scores = [r['silhouette'] for r in evaluation_results]
+        calinski_scores = [r['calinski_harabasz'] for r in evaluation_results]
+        wcss_scores = [r['wcss'] for r in evaluation_results]
+        db_scores = [r['davies_bouldin'] for r in evaluation_results]
+        
+        # Normalize metrics (higher normalized score = better)
+        norm_silhouette = normalize_metric(silhouette_scores, higher_is_better=True)
+        norm_calinski = normalize_metric(calinski_scores, higher_is_better=True)
+        norm_wcss = normalize_metric(wcss_scores, higher_is_better=False)  # Lower WCSS is better
+        norm_db = normalize_metric(db_scores, higher_is_better=False)  # Lower DB score is better
+        
+        # Calculate elbow score for WCSS
+        elbow_scores = self._calculate_elbow_scores(k_values, wcss_scores)
+        norm_elbow = normalize_metric(elbow_scores, higher_is_better=True)
+        
+        # Weighted combination of metrics
+        weights = {
+            'silhouette': 0.35,      # Primary metric for cluster separation
+            'calinski': 0.20,        # Cluster compactness vs separation
+            'elbow': 0.25,           # Elbow method for natural clustering
+            'davies_bouldin': 0.20   # Inter vs intra-cluster distances
+        }
+        
+        # Calculate composite scores
+        composite_scores = []
+        for i in range(len(evaluation_results)):
+            score = (
+                weights['silhouette'] * norm_silhouette[i] +
+                weights['calinski'] * norm_calinski[i] +
+                weights['elbow'] * norm_elbow[i] +
+                weights['davies_bouldin'] * norm_db[i]
+            )
+            
+            # Penalty for too many clusters (prefer simpler solutions)
+            k_penalty = (k_values[i] - 2) * 0.05  # Small penalty for each additional cluster
+            final_score = max(0, score - k_penalty)
+            
+            composite_scores.append(final_score)
+        
+        # Find k with highest composite score
+        best_idx = composite_scores.index(max(composite_scores))
+        optimal_k = evaluation_results[best_idx]['k']
+        
+        # Log the decision for transparency
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Optimal clusters selected: k={optimal_k}")
+        logger.info(f"Evaluation scores: {dict(zip(k_values, composite_scores))}")
+        
+        return optimal_k
+    
+    def _calculate_elbow_scores(self, k_values: List[int], wcss_values: List[float]) -> List[float]:
+        """
+        Calculate elbow scores using the rate of change in WCSS.
+        
+        Args:
+            k_values: List of k values
+            wcss_values: Corresponding WCSS values
+            
+        Returns:
+            List[float]: Elbow scores (higher = better elbow point)
+        """
+        if len(wcss_values) < 3:
+            return [0.5] * len(wcss_values)
+        
+        # Calculate second derivatives (rate of change of rate of change)
+        elbow_scores = [0.0] * len(wcss_values)
+        
+        for i in range(1, len(wcss_values) - 1):
+            # Calculate curvature using second derivative approximation
+            prev_slope = wcss_values[i] - wcss_values[i-1]
+            next_slope = wcss_values[i+1] - wcss_values[i]
+            curvature = abs(next_slope - prev_slope)
+            elbow_scores[i] = curvature
+        
+        return elbow_scores
     
     def _apply_clustering_algorithm(
         self, 
