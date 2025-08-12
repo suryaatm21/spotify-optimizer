@@ -9,13 +9,14 @@ import { ArrowLeft, Play, BarChart3, Loader2, RefreshCw, Settings } from 'lucide
 import useSWR from 'swr';
 
 import Layout from '@/components/Layout';
-import StatsTable from '@/components/StatsTable';
+import EnhancedStatsTable from '@/components/EnhancedStatsTable';
 import ClusterChart from '@/components/ClusterChart';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import ErrorMessage from '@/components/ErrorMessage';
 import OptimizationPanel from '@/components/OptimizationPanel';
 import PlaylistManager from '@/components/PlaylistManager';
 import TrackManager from '@/components/TrackManager';
+import BulkActionsModal from '@/components/BulkActionsModal';
 import { useAuth } from '@/hooks/useAuth';
 import { fetcher } from '@/lib/api';
 import {
@@ -39,6 +40,10 @@ export default function PlaylistStats() {
 
   // CRUD Management State
   const [activeTab, setActiveTab] = useState<'analysis' | 'playlist' | 'tracks'>('analysis');
+
+  // Bulk Actions State
+  const [selectedTrackIds, setSelectedTrackIds] = useState<string[]>([]);
+  const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
 
   // Ensure component is mounted before using router
   useEffect(() => {
@@ -354,9 +359,9 @@ export default function PlaylistStats() {
               )}
             </div>
 
-            {/* Right Column - Management & Optimization */}
+            {/* Right Column - Track Management & Analysis */}
             <div className="space-y-8">
-              {/* Management Tabs */}
+              {/* Simplified Management Tabs */}
               <div className="bg-spotify-gray-800/50 backdrop-blur-sm rounded-xl border border-spotify-gray-700">
                 {/* Tab Navigation */}
                 <div className="flex border-b border-spotify-gray-700">
@@ -371,17 +376,6 @@ export default function PlaylistStats() {
                     Analysis
                   </button>
                   <button
-                    onClick={() => setActiveTab('playlist')}
-                    className={`px-4 py-3 text-sm font-medium transition-colors ${
-                      activeTab === 'playlist'
-                        ? 'text-spotify-green border-b-2 border-spotify-green'
-                        : 'text-spotify-gray-400 hover:text-white'
-                    }`}
-                  >
-                    <Settings className="w-4 h-4 inline mr-1" />
-                    Playlist
-                  </button>
-                  <button
                     onClick={() => setActiveTab('tracks')}
                     className={`px-4 py-3 text-sm font-medium transition-colors ${
                       activeTab === 'tracks'
@@ -389,7 +383,7 @@ export default function PlaylistStats() {
                         : 'text-spotify-gray-400 hover:text-white'
                     }`}
                   >
-                    Tracks
+                    Add Tracks
                   </button>
                 </div>
 
@@ -429,22 +423,15 @@ export default function PlaylistStats() {
                     </div>
                   )}
 
-                  {activeTab === 'playlist' && playlistMeta && (
-                    <PlaylistManager
-                      playlistId={playlistId}
-                      playlistName={playlistMeta.name}
-                      playlistDescription={playlistMeta.description}
-                      isPublic={playlistMeta.is_public}
-                      onPlaylistUpdated={handleDataUpdated}
-                    />
-                  )}
-
                   {activeTab === 'tracks' && (
-                    <TrackManager
-                      playlistId={playlistId}
-                      tracks={tracks}
-                      onTracksUpdated={handleDataUpdated}
-                    />
+                    <div>
+                      <h3 className="text-lg font-semibold text-white mb-4">Add New Tracks</h3>
+                      <TrackManager
+                        playlistId={playlistId}
+                        tracks={tracks}
+                        onTracksUpdated={handleDataUpdated}
+                      />
+                    </div>
                   )}
                 </div>
               </div>
@@ -457,12 +444,27 @@ export default function PlaylistStats() {
               <h2 className="text-xl font-bold text-white mb-4">
                 Track Details
               </h2>
-              <StatsTable
+              <EnhancedStatsTable
                 tracks={tracks}
                 clusters={analysisResult?.clusters || []}
+                selectedTrackIds={selectedTrackIds}
+                onSelectionChange={setSelectedTrackIds}
+                onBulkAction={() => setIsBulkModalOpen(true)}
               />
             </div>
           )}
+
+          {/* Bulk Actions Modal */}
+          <BulkActionsModal
+            isOpen={isBulkModalOpen}
+            onClose={() => {
+              setIsBulkModalOpen(false);
+              setSelectedTrackIds([]);
+            }}
+            selectedTrackIds={selectedTrackIds}
+            currentPlaylistId={playlistId || ''}
+            trackNames={tracks?.filter(t => selectedTrackIds.includes(t.spotify_track_id)).map(t => t.name) || []}
+          />
         </main>
       </div>
     </Layout>

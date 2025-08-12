@@ -170,15 +170,15 @@ export default function TrackManager({
   };
 
   return (
-    <div className="bg-white p-6 rounded-lg shadow-md border border-gray-200">
+    <div className="bg-spotify-gray-800/50 backdrop-blur-sm rounded-xl p-6 border border-spotify-gray-700">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-semibold text-gray-900">
+        <h3 className="text-lg font-semibold text-white">
           Track Management
         </h3>
         
         <button
           onClick={() => setIsSearching(!isSearching)}
-          className="flex items-center px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
+          className="flex items-center px-3 py-2 bg-spotify-green text-black rounded-md hover:bg-spotify-green/90 transition-colors font-medium"
           disabled={isLoading}
         >
           {isSearching ? (
@@ -196,15 +196,15 @@ export default function TrackManager({
       </div>
 
       {error && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
-          <p className="text-red-700 text-sm">{error}</p>
+        <div className="mb-4 p-3 bg-red-900/20 border border-red-700 rounded-md">
+          <p className="text-red-300 text-sm">{error}</p>
         </div>
       )}
 
       {/* Search Interface */}
       {isSearching && (
-        <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-md">
-          <h4 className="font-medium text-green-900 mb-3">Search & Add Tracks</h4>
+        <div className="mb-6 p-4 bg-spotify-green/10 border border-spotify-green/30 rounded-md">
+          <h4 className="font-medium text-spotify-green mb-3">Search & Add Tracks</h4>
           
           <div className="flex space-x-2 mb-4">
             <input
@@ -212,13 +212,13 @@ export default function TrackManager({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-              className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+              className="flex-1 px-3 py-2 bg-spotify-gray-700 border border-spotify-gray-600 rounded-md text-white placeholder-spotify-gray-400 focus:outline-none focus:ring-2 focus:ring-spotify-green focus:border-transparent"
               placeholder="Search for tracks, artists, or albums..."
               disabled={isLoading}
             />
             <button
               onClick={handleSearch}
-              className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors disabled:opacity-50"
+              className="px-4 py-2 bg-spotify-green text-black rounded-md hover:bg-spotify-green/90 transition-colors disabled:opacity-50 font-medium"
               disabled={isLoading || !searchQuery.trim()}
             >
               {isLoading ? (
@@ -233,13 +233,13 @@ export default function TrackManager({
           {searchResults.length > 0 && (
             <div>
               <div className="flex items-center justify-between mb-3">
-                <span className="text-sm text-gray-600">
+                <span className="text-sm text-spotify-gray-400">
                   {searchResults.length} results found
                 </span>
                 {selectedTracks.size > 0 && (
                   <button
                     onClick={() => handleAddTracks(Array.from(selectedTracks))}
-                    className="px-3 py-1 bg-green-600 text-white text-sm rounded-md hover:bg-green-700 transition-colors"
+                    className="px-3 py-1 bg-spotify-green text-black text-sm rounded-md hover:bg-spotify-green/90 transition-colors font-medium"
                     disabled={isLoading}
                   >
                     Add {selectedTracks.size} selected
@@ -253,8 +253,8 @@ export default function TrackManager({
                     key={track.id}
                     className={`flex items-center p-3 border rounded-md mb-2 cursor-pointer transition-colors ${
                       selectedTracks.has(track.id)
-                        ? 'border-green-500 bg-green-50'
-                        : 'border-gray-200 hover:bg-gray-50'
+                        ? 'border-spotify-green bg-spotify-green/10'
+                        : 'border-spotify-gray-600 hover:bg-spotify-gray-700/50'
                     }`}
                     onClick={() => toggleTrackSelection(track.id)}
                   >
@@ -262,24 +262,24 @@ export default function TrackManager({
                       type="checkbox"
                       checked={selectedTracks.has(track.id)}
                       onChange={() => {}} // Handled by parent onClick
-                      className="mr-3 h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded"
+                      className="mr-3 h-4 w-4 text-spotify-green focus:ring-spotify-green border-spotify-gray-600 bg-spotify-gray-700 rounded"
                     />
                     
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center">
-                        <Music className="w-4 h-4 text-gray-400 mr-2 flex-shrink-0" />
+                        <Music className="w-4 h-4 text-spotify-gray-400 mr-2 flex-shrink-0" />
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium text-gray-900 truncate">
+                          <p className="text-sm font-medium text-white truncate">
                             {track.name}
                           </p>
-                          <p className="text-sm text-gray-500 truncate">
+                          <p className="text-sm text-spotify-gray-400 truncate">
                             {track.artists.map(a => a.name).join(', ')} • {track.album.name}
                           </p>
                         </div>
                       </div>
                     </div>
                     
-                    <span className="text-sm text-gray-400 ml-2">
+                    <span className="text-sm text-spotify-gray-400 ml-2">
                       {formatDuration(track.duration_ms)}
                     </span>
                   </div>
@@ -289,7 +289,7 @@ export default function TrackManager({
           )}
 
           {searchResults.length === 0 && searchQuery && !isLoading && (
-            <div className="text-center py-8 text-gray-500">
+            <div className="text-center py-8 text-spotify-gray-400">
               <Music className="w-12 h-12 mx-auto mb-2 opacity-50" />
               <p>No tracks found for "{searchQuery}"</p>
               <p className="text-sm">Try a different search term</p>
@@ -300,12 +300,12 @@ export default function TrackManager({
 
       {/* Current Tracks with Remove Options */}
       <div>
-        <h4 className="font-medium text-gray-900 mb-3">
+        <h4 className="font-medium text-white mb-3">
           Current Tracks ({tracks.length})
         </h4>
         
         {tracks.length === 0 ? (
-          <div className="text-center py-8 text-gray-500">
+          <div className="text-center py-8 text-spotify-gray-400">
             <Music className="w-12 h-12 mx-auto mb-2 opacity-50" />
             <p>No tracks in this playlist</p>
             <p className="text-sm">Add some tracks to get started</p>
@@ -315,16 +315,16 @@ export default function TrackManager({
             {tracks.map((track, index) => (
               <div
                 key={`${track.spotify_track_id}-${index}`}
-                className="flex items-center p-3 border border-gray-200 rounded-md mb-2 hover:bg-gray-50 transition-colors"
+                className="flex items-center p-3 border border-spotify-gray-600 rounded-md mb-2 hover:bg-spotify-gray-700/50 transition-colors"
               >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center">
-                    <Music className="w-4 h-4 text-gray-400 mr-2 flex-shrink-0" />
+                    <Music className="w-4 h-4 text-spotify-gray-400 mr-2 flex-shrink-0" />
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-gray-900 truncate">
+                      <p className="text-sm font-medium text-white truncate">
                         {track.name}
                       </p>
-                      <p className="text-sm text-gray-500 truncate">
+                      <p className="text-sm text-spotify-gray-400 truncate">
                         {track.artist} • {track.album}
                       </p>
                     </div>
@@ -332,12 +332,12 @@ export default function TrackManager({
                 </div>
                 
                 <div className="flex items-center space-x-2">
-                  <span className="text-sm text-gray-400">
+                  <span className="text-sm text-spotify-gray-400">
                     {formatDuration(track.duration_ms)}
                   </span>
                   <button
                     onClick={() => handleRemoveTrack(track.spotify_track_id, track.name)}
-                    className="p-1 text-red-600 hover:bg-red-50 rounded transition-colors"
+                    className="p-1 text-red-400 hover:bg-red-900/20 rounded transition-colors"
                     disabled={isLoading}
                     title="Remove track"
                   >

@@ -193,9 +193,9 @@ export default function PlaylistManager({
   };
 
   return (
-    <div className="bg-white p-6 rounded-lg shadow-md border border-gray-200">
+    <div className="bg-spotify-gray-800/50 backdrop-blur-sm rounded-xl p-6 border border-spotify-gray-700">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-semibold text-gray-900">
+        <h3 className="text-lg font-semibold text-white">
           Playlist Management
         </h3>
         
@@ -203,7 +203,7 @@ export default function PlaylistManager({
           {!isCreating && (
             <button
               onClick={() => setIsCreating(true)}
-              className="flex items-center px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
+              className="flex items-center px-3 py-2 bg-spotify-green text-black rounded-md hover:bg-spotify-green/90 transition-colors font-medium"
               disabled={isLoading}
             >
               <Plus className="w-4 h-4 mr-1" />
@@ -236,39 +236,39 @@ export default function PlaylistManager({
       </div>
 
       {error && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
-          <p className="text-red-700 text-sm">{error}</p>
+        <div className="mb-4 p-3 bg-red-900/20 border border-red-700 rounded-md">
+          <p className="text-red-300 text-sm">{error}</p>
         </div>
       )}
 
       {/* Create New Playlist Form */}
       {isCreating && (
-        <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-md">
-          <h4 className="font-medium text-green-900 mb-3">Create New Playlist</h4>
+        <div className="mb-6 p-4 bg-spotify-green/10 border border-spotify-green/30 rounded-md">
+          <h4 className="font-medium text-spotify-green mb-3">Create New Playlist</h4>
           
           <div className="space-y-3">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-spotify-gray-300 mb-1">
                 Name *
               </label>
               <input
                 type="text"
                 value={createForm.name}
                 onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                className="w-full px-3 py-2 bg-spotify-gray-700 border border-spotify-gray-600 rounded-md text-white placeholder-spotify-gray-400 focus:outline-none focus:ring-2 focus:ring-spotify-green focus:border-transparent"
                 placeholder="Enter playlist name"
                 disabled={isLoading}
               />
             </div>
             
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-spotify-gray-300 mb-1">
                 Description
               </label>
               <textarea
                 value={createForm.description}
                 onChange={(e) => setCreateForm({ ...createForm, description: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                className="w-full px-3 py-2 bg-spotify-gray-700 border border-spotify-gray-600 rounded-md text-white placeholder-spotify-gray-400 focus:outline-none focus:ring-2 focus:ring-spotify-green focus:border-transparent"
                 placeholder="Enter playlist description"
                 rows={2}
                 disabled={isLoading}
@@ -281,10 +281,10 @@ export default function PlaylistManager({
                 id="create-public"
                 checked={createForm.is_public}
                 onChange={(e) => setCreateForm({ ...createForm, is_public: e.target.checked })}
-                className="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded"
+                className="h-4 w-4 text-spotify-green focus:ring-spotify-green border-spotify-gray-600 bg-spotify-gray-700 rounded"
                 disabled={isLoading}
               />
-              <label htmlFor="create-public" className="ml-2 block text-sm text-gray-700">
+              <label htmlFor="create-public" className="ml-2 block text-sm text-spotify-gray-300">
                 Make playlist public
               </label>
             </div>
@@ -293,7 +293,7 @@ export default function PlaylistManager({
           <div className="flex justify-end space-x-2 mt-4">
             <button
               onClick={resetCreateForm}
-              className="px-4 py-2 text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+              className="px-4 py-2 text-spotify-gray-300 border border-spotify-gray-600 rounded-md hover:bg-spotify-gray-700 transition-colors"
               disabled={isLoading}
             >
               <X className="w-4 h-4 mr-1 inline" />
@@ -301,7 +301,7 @@ export default function PlaylistManager({
             </button>
             <button
               onClick={handleCreatePlaylist}
-              className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors disabled:opacity-50"
+              className="px-4 py-2 bg-spotify-green text-black rounded-md hover:bg-spotify-green/90 transition-colors disabled:opacity-50 font-medium"
               disabled={isLoading || !createForm.name.trim()}
             >
               {isLoading ? (
@@ -317,32 +317,32 @@ export default function PlaylistManager({
 
       {/* Edit Existing Playlist Form */}
       {isEditing && playlistId && (
-        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-md">
-          <h4 className="font-medium text-blue-900 mb-3">Edit Playlist</h4>
+        <div className="mb-6 p-4 bg-blue-600/10 border border-blue-600/30 rounded-md">
+          <h4 className="font-medium text-blue-400 mb-3">Edit Playlist</h4>
           
           <div className="space-y-3">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-spotify-gray-300 mb-1">
                 Name
               </label>
               <input
                 type="text"
                 value={editForm.name || ''}
                 onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 bg-spotify-gray-700 border border-spotify-gray-600 rounded-md text-white placeholder-spotify-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 placeholder="Enter playlist name"
                 disabled={isLoading}
               />
             </div>
             
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-spotify-gray-300 mb-1">
                 Description
               </label>
               <textarea
                 value={editForm.description || ''}
                 onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 bg-spotify-gray-700 border border-spotify-gray-600 rounded-md text-white placeholder-spotify-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 placeholder="Enter playlist description"
                 rows={2}
                 disabled={isLoading}
@@ -355,10 +355,10 @@ export default function PlaylistManager({
                 id="edit-public"
                 checked={editForm.is_public || false}
                 onChange={(e) => setEditForm({ ...editForm, is_public: e.target.checked })}
-                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-spotify-gray-600 bg-spotify-gray-700 rounded"
                 disabled={isLoading}
               />
-              <label htmlFor="edit-public" className="ml-2 block text-sm text-gray-700">
+              <label htmlFor="edit-public" className="ml-2 block text-sm text-spotify-gray-300">
                 Make playlist public
               </label>
             </div>
@@ -367,7 +367,7 @@ export default function PlaylistManager({
           <div className="flex justify-end space-x-2 mt-4">
             <button
               onClick={resetEditForm}
-              className="px-4 py-2 text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+              className="px-4 py-2 text-spotify-gray-300 border border-spotify-gray-600 rounded-md hover:bg-spotify-gray-700 transition-colors"
               disabled={isLoading}
             >
               <X className="w-4 h-4 mr-1 inline" />
@@ -391,10 +391,10 @@ export default function PlaylistManager({
 
       {/* Current Playlist Info */}
       {playlistId && !isEditing && (
-        <div className="text-sm text-gray-600">
-          <p><strong>Current:</strong> {playlistName}</p>
-          {playlistDescription && <p><strong>Description:</strong> {playlistDescription}</p>}
-          <p><strong>Visibility:</strong> {isPublic ? 'Public' : 'Private'}</p>
+        <div className="text-sm text-spotify-gray-400">
+          <p><strong className="text-white">Current:</strong> {playlistName}</p>
+          {playlistDescription && <p><strong className="text-white">Description:</strong> {playlistDescription}</p>}
+          <p><strong className="text-white">Visibility:</strong> {isPublic ? 'Public' : 'Private'}</p>
         </div>
       )}
     </div>
