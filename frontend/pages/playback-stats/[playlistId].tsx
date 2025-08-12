@@ -251,7 +251,7 @@ export default function PlaylistStats() {
                   {playlistId && (
                     <Link
                       href={`/optimize/${playlistId}`}
-                      className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded-lg transition-colors">
+                      className="flex items-center gap-2 bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 px-4 rounded-lg transition-colors">
                       <BarChart3 size={16} />
                       <span>Optimize</span>
                     </Link>
@@ -316,8 +316,8 @@ export default function PlaylistStats() {
 
               {/* Cluster Visualization */}
               {analysisResult && (
-                <div className="bg-spotify-gray-800/50 backdrop-blur-sm rounded-xl p-6 border border-spotify-gray-700 overflow-visible relative">
-                  <h2 className="text-xl font-bold text-white mb-4">
+                <div className="bg-spotify-gray-800/50 backdrop-blur-sm rounded-xl p-6 border border-spotify-gray-700 mb-12">
+                  <h2 className="text-xl font-bold text-white mb-6">
                     Cluster Analysis
                   </h2>
                   <ClusterChart

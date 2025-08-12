@@ -158,57 +158,49 @@ export default function ClusterChart({
   }
 
   return (
-    <div className="h-96 w-full">
-      <ResponsiveContainer width="100%" height="100%">
-        <ScatterChart
-          data={scatterData}
-          margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#404040" />
-          <XAxis
-            type="number"
-            dataKey="x"
-            domain={['dataMin - 1', 'dataMax + 1']}
-            tick={{ fill: '#9ca3af', fontSize: 12 }}
-            axisLine={{ stroke: '#6b7280' }}
-            tickLine={{ stroke: '#6b7280' }}
-          />
-          <YAxis
-            type="number"
-            dataKey="y"
-            domain={['dataMin - 1', 'dataMax + 1']}
-            tick={{ fill: '#9ca3af', fontSize: 12 }}
-            axisLine={{ stroke: '#6b7280' }}
-            tickLine={{ stroke: '#6b7280' }}
-          />
-          <Tooltip content={<CustomTooltip />} />
-          <Legend
-            wrapperStyle={{ color: '#9ca3af' }}
-            formatter={(value: string, entry: any) => {
-              const clusterId = parseInt(value);
-              const cluster = clusters.find((c) => c.cluster_id === clusterId);
-              return (
-                <span style={{ color: '#9ca3af' }}>
-                  {cluster?.label || `Cluster ${clusterId + 1}`}
-                </span>
-              );
-            }}
-          />
-
-          {Object.entries(clusterGroups).map(([clusterId, points]) => (
-            <Scatter
-              key={clusterId}
-              name={clusterId}
-              data={points}
-              fill={clusterColors[parseInt(clusterId) % clusterColors.length]}
-              strokeWidth={2}
-              stroke="#1f2937"
+    <div className="w-full space-y-6">
+      {/* Chart Container */}
+      <div className="h-96 w-full">
+        <ResponsiveContainer width="100%" height="100%">
+          <ScatterChart
+            data={scatterData}
+            margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#404040" />
+            <XAxis
+              type="number"
+              dataKey="x"
+              domain={['dataMin - 1', 'dataMax + 1']}
+              tick={{ fill: '#9ca3af', fontSize: 12 }}
+              axisLine={{ stroke: '#6b7280' }}
+              tickLine={{ stroke: '#6b7280' }}
             />
-          ))}
-        </ScatterChart>
-      </ResponsiveContainer>
+            <YAxis
+              type="number"
+              dataKey="y"
+              domain={['dataMin - 1', 'dataMax + 1']}
+              tick={{ fill: '#9ca3af', fontSize: 12 }}
+              axisLine={{ stroke: '#6b7280' }}
+              tickLine={{ stroke: '#6b7280' }}
+            />
+            <Tooltip content={<CustomTooltip />} />
+            {/* Legend removed to avoid duplicate labels; custom legend with counts is shown below */}
+
+            {Object.entries(clusterGroups).map(([clusterId, points]) => (
+              <Scatter
+                key={clusterId}
+                name={clusterId}
+                data={points}
+                fill={clusterColors[parseInt(clusterId) % clusterColors.length]}
+                strokeWidth={2}
+                stroke="#1f2937"
+              />
+            ))}
+          </ScatterChart>
+        </ResponsiveContainer>
+      </div>
 
       {/* Cluster Legend */}
-      <div className="mt-4 flex flex-wrap gap-3">
+      <div className="flex flex-wrap gap-3">
         {clusters.map((cluster) => (
           <div
             key={cluster.cluster_id}
@@ -229,7 +221,7 @@ export default function ClusterChart({
       </div>
 
       {/* Chart Description */}
-      <div className="mt-4 text-center">
+      <div className="text-center">
         <p className="text-spotify-gray-400 text-sm">
           PCA visualization of track audio features. Each point represents a
           track, colored by cluster assignment.
