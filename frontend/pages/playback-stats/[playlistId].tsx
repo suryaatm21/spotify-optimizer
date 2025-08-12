@@ -3,6 +3,7 @@
  * Shows track details, clustering results, and optimization suggestions.
  */
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { ArrowLeft, Play, BarChart3, Loader2, RefreshCw } from 'lucide-react';
 import useSWR from 'swr';
@@ -245,6 +246,16 @@ export default function PlaylistStats() {
                       {isAnalyzing ? 'Analyzing...' : 'Analyze Playlist'}
                     </span>
                   </button>
+
+                  {/* Optimize Button */}
+                  {playlistId && (
+                    <Link
+                      href={`/optimize/${playlistId}`}
+                      className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded-lg transition-colors">
+                      <BarChart3 size={16} />
+                      <span>Optimize</span>
+                    </Link>
+                  )}
                 </div>
               </div>
             </div>
@@ -305,7 +316,7 @@ export default function PlaylistStats() {
 
               {/* Cluster Visualization */}
               {analysisResult && (
-                <div className="bg-spotify-gray-800/50 backdrop-blur-sm rounded-xl p-6 border border-spotify-gray-700">
+                <div className="bg-spotify-gray-800/50 backdrop-blur-sm rounded-xl p-6 border border-spotify-gray-700 overflow-visible relative">
                   <h2 className="text-xl font-bold text-white mb-4">
                     Cluster Analysis
                   </h2>
