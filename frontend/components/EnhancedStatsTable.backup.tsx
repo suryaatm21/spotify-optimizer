@@ -1,44 +1,21 @@
-/**
- * Enhanced Stats Table with scrollable container, resizable columns, and text wrapping
+/**import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { ChevronDown, ChevronUp, Search, Music, Filter, Eye, EyeOff } from 'lucide-react';
+import { Track, ClusterResult } from '../types';
+import BulkActionsModal from './BulkActionsModal'; Enhanced StatsTable with track selection and bulk operations
  */
-import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { ChevronDown, ChevronUp, Search, Music, Eye, EyeOff } from 'lucide-react';
-
-interface Track {
-  id: number;
-  spotify_track_id: string;
-  name: string;
-  artist: string;
-  album?: string;
-  popularity?: number;
-  danceability?: number;
-  energy?: number;
-  valence?: number;
-  tempo?: number;
-  acousticness?: number;
-  instrumentalness?: number;
-  liveness?: number;
-  speechiness?: number;
-  loudness?: number;
-  key?: number;
-  mode?: number;
-}
-
-interface ClusterResult {
-  cluster_id: number;
-  label?: string;
-  track_ids: number[];
-}
+import { useState, useMemo, useEffect } from 'react';
+import { ChevronUp, ChevronDown, Music, Search, X, Eye, EyeOff } from 'lucide-react';
+import { ITrack, IClusterData } from '@/types/playlist';
 
 interface IEnhancedStatsTableProps {
-  tracks: Track[];
-  clusters?: ClusterResult[];
+  tracks: ITrack[];
+  clusters?: IClusterData[];
   selectedTrackIds?: string[];
-  onSelectionChange?: (selectedIds: string[]) => void;
-  onBulkAction?: (action: string, data: any) => void;
+  onSelectionChange?: (trackIds: string[]) => void;
+  onBulkAction?: () => void;
 }
 
-type SortField = 'name' | 'artist' | 'album' | 'popularity' | 'cluster' | 'danceability' | 'energy' | 'valence' | 'tempo' | 'acousticness' | 'instrumentalness' | 'liveness' | 'speechiness' | 'loudness' | 'key' | 'mode';
+type SortField = keyof ITrack | 'cluster';
 type SortDirection = 'asc' | 'desc';
 
 interface ColumnVisibility {
@@ -199,71 +176,84 @@ export default function EnhancedStatsTable({
   const trackClusterMap = useMemo(() => {
     const map = new Map<number, number>();
     clusters.forEach((cluster) => {
-      cluster.track_ids.forEach((trackId: number) => {
+      cluster.track_ids.forEach((trackId) => {
         map.set(trackId, cluster.cluster_id);
       });
     });
     return map;
   }, [clusters]);
 
-  // Get unique clusters for filtering
+  // Get unique clusters from track-cluster mapping  
   const uniqueClusters = useMemo(() => {
-    return clusters.map(cluster => ({
-      id: cluster.cluster_id,
-      label: cluster.label || `Cluster ${cluster.cluster_id}`,
-      count: cluster.track_ids.length
-    }));
-  }, [clusters]);
+    const clusterIds = new Set<number>();
+    tracks.forEach((track) => {
+      const clusterId = trackClusterMap.get(track.id);
+      if (clusterId !== undefined) {
+        clusterIds.add(clusterId);
+      }
+    });
+    return Array.from(clusterIds).sort((a, b) => a - b);
+  }, [tracks, trackClusterMap]);
 
-  // Filtering and sorting
+  // Filter and sort tracks
   const filteredAndSortedTracks = useMemo(() => {
     let filtered = tracks;
 
-    // Filter by search query
+    // Apply search filter
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
-      filtered = filtered.filter(track =>
-        track.name.toLowerCase().includes(query) ||
-        track.artist.toLowerCase().includes(query) ||
-        (track.album && track.album.toLowerCase().includes(query))
+      filtered = filtered.filter(
+        (track) =>
+          track.name.toLowerCase().includes(query) ||
+          track.artist.toLowerCase().includes(query) ||
+          (track.album && track.album.toLowerCase().includes(query)),
       );
     }
 
-    // Filter by cluster
+    // Apply cluster filter
     if (selectedCluster !== null) {
-      filtered = filtered.filter(track => trackClusterMap.get(track.id) === selectedCluster);
+      filtered = filtered.filter(
+        (track) => trackClusterMap.get(track.id) === selectedCluster,
+      );
     }
 
-    // Sort
-    filtered.sort((a, b) => {
+    // Sort tracks
+    return [...filtered].sort((a, b) => {
       let aValue: any, bValue: any;
 
-      switch (sortField) {
-        case 'cluster':
-          aValue = trackClusterMap.get(a.id) ?? -1;
-          bValue = trackClusterMap.get(b.id) ?? -1;
-          break;
-        default:
-          aValue = a[sortField];
-          bValue = b[sortField];
+      if (sortField === 'cluster') {
+        aValue = trackClusterMap.get(a.id) ?? -1;
+        bValue = trackClusterMap.get(b.id) ?? -1;
+      } else {
+        aValue = a[sortField];
+        bValue = b[sortField];
       }
 
-      if (aValue == null) aValue = '';
-      if (bValue == null) bValue = '';
+      // Handle null/undefined values
+      if (aValue == null && bValue == null) return 0;
+      if (aValue == null) return 1;
+      if (bValue == null) return -1;
 
+      let comparison = 0;
       if (typeof aValue === 'string' && typeof bValue === 'string') {
-        return sortDirection === 'asc' 
-          ? aValue.localeCompare(bValue)
-          : bValue.localeCompare(aValue);
+        comparison = aValue.localeCompare(bValue);
+      } else {
+        comparison = aValue < bValue ? -1 : aValue > bValue ? 1 : 0;
       }
 
-      return sortDirection === 'asc' ? aValue - bValue : bValue - aValue;
+      return sortDirection === 'asc' ? comparison : -comparison;
     });
+  }, [tracks, trackClusterMap, selectedCluster, searchQuery, sortField, sortDirection]);
 
-    return filtered;
-  }, [tracks, searchQuery, selectedCluster, sortField, sortDirection, trackClusterMap]);
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
 
-  // Selection handlers
   const handleSelectTrack = (trackId: string) => {
     const newSelection = new Set(selectedTracks);
     if (newSelection.has(trackId)) {
@@ -275,27 +265,20 @@ export default function EnhancedStatsTable({
   };
 
   const handleSelectAll = () => {
-    if (allSelected) {
+    if (selectedTracks.size === filteredAndSortedTracks.length && filteredAndSortedTracks.length > 0) {
+      // Deselect all
       setSelectedTracks(new Set());
     } else {
-      const allTrackIds = filteredAndSortedTracks.map(track => track.spotify_track_id);
-      setSelectedTracks(new Set(allTrackIds));
-    }
-  };
-
-  const handleSort = (field: SortField) => {
-    if (sortField === field) {
-      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortField(field);
-      setSortDirection('asc');
+      // Select all filtered tracks
+      const allTrackIds = new Set(filteredAndSortedTracks.map(track => track.spotify_track_id));
+      setSelectedTracks(allTrackIds);
     }
   };
 
   const formatAudioFeature = (value: number | null | undefined): string => {
     if (value === null || value === undefined) return 'N/A';
-    if (value >= 1) return Math.round(value).toString(); // For values like tempo, loudness
-    return `${Math.round(value * 100)}%`; // For 0-1 scale features
+    if (typeof value === 'number') return value.toFixed(3);
+    return 'N/A';
   };
 
   const formatKey = (key: number | null | undefined): string => {
@@ -330,7 +313,7 @@ export default function EnhancedStatsTable({
 
   const renderResizableHeader = (columnKey: string, children: React.ReactNode) => (
     <th 
-      className="relative p-3 text-left border-r border-spotify-gray-600 last:border-r-0 bg-spotify-gray-800"
+      className="relative p-3 text-left border-r border-spotify-gray-600 last:border-r-0"
       style={{ width: `${columnWidths[columnKey as keyof ColumnWidths]}px`, minWidth: '50px' }}
     >
       <div className="flex items-center justify-between">
@@ -379,9 +362,8 @@ export default function EnhancedStatsTable({
             className="w-full pl-10 pr-4 py-2 bg-spotify-gray-700 border border-spotify-gray-600 rounded-lg text-white placeholder-spotify-gray-400 focus:outline-none focus:ring-2 focus:ring-spotify-green"
           />
         </div>
-
+        
         <div className="flex gap-2">
-          {/* Cluster Filter */}
           {uniqueClusters.length > 0 && (
             <select
               value={selectedCluster ?? ''}
@@ -389,14 +371,18 @@ export default function EnhancedStatsTable({
               className="px-3 py-2 bg-spotify-gray-700 border border-spotify-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-spotify-green"
             >
               <option value="">All Clusters</option>
-              {uniqueClusters.map(cluster => (
-                <option key={cluster.id} value={cluster.id}>
-                  {cluster.label} ({cluster.count})
-                </option>
-              ))}
+              {uniqueClusters.map((clusterId) => {
+                const cluster = clusters.find(c => c.cluster_id === clusterId);
+                const label = cluster?.label || `Cluster ${clusterId}`;
+                return (
+                  <option key={clusterId} value={clusterId}>
+                    {label}
+                  </option>
+                );
+              })}
             </select>
           )}
-
+          
           {/* Column Visibility Toggle */}
           <div className="relative column-controls">
             <button
@@ -443,14 +429,38 @@ export default function EnhancedStatsTable({
         </div>
       </div>
 
-      {/* Track Count and Selection Status */}
+      {/* Bulk Actions Bar */}
+      {showBulkActions && (
+        <div className="bg-spotify-green/10 border border-spotify-green/30 rounded-lg p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-4">
+              <span className="text-spotify-green font-medium">
+                {selectedTracks.size} track{selectedTracks.size !== 1 ? 's' : ''} selected
+              </span>
+            </div>
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={onBulkAction}
+                className="px-3 py-1 bg-spotify-green text-black rounded-md hover:bg-spotify-green/90 transition-colors text-sm font-medium"
+              >
+                Bulk Actions
+              </button>
+              <button
+                onClick={() => {
+                  setSelectedTracks(new Set());
+                }}
+                className="p-1 text-spotify-gray-400 hover:text-white transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Results count */}
       <div className="text-sm text-spotify-gray-400">
-        {selectedTracks.size > 0 && (
-          <span className="mr-4 text-spotify-green">
-            {selectedTracks.size} selected
-          </span>
-        )}
-        {filteredAndSortedTracks.length} tracks
+        Showing {filteredAndSortedTracks.length} of {tracks.length} tracks
         {selectedCluster !== null && (() => {
           const cluster = clusters.find(c => c.cluster_id === selectedCluster);
           const label = cluster?.label || `Cluster ${selectedCluster}`;
@@ -459,7 +469,7 @@ export default function EnhancedStatsTable({
         {searchQuery && ` matching "${searchQuery}"`}
       </div>
 
-      {/* Scrollable Table Container */}
+      {/* Table Container - Scrollable */}
       <div className="bg-spotify-gray-800/50 rounded-lg border border-spotify-gray-700">
         <div className="overflow-auto max-h-[600px]" style={{ minHeight: '400px' }}>
           <table className="w-full table-fixed">
@@ -520,173 +530,163 @@ export default function EnhancedStatsTable({
                 }
               </tr>
             </thead>
-            <tbody>
-              {filteredAndSortedTracks.map((track) => (
-                <tr
-                  key={track.id}
-                  className={`border-b border-spotify-gray-700/50 hover:bg-spotify-gray-700/30 transition-colors ${
-                    selectedTracks.has(track.spotify_track_id) ? 'bg-spotify-green/10' : ''
-                  }`}
-                >
-                  {renderTableCell('checkbox', 
-                    <input
-                      type="checkbox"
-                      checked={selectedTracks.has(track.spotify_track_id)}
-                      onChange={() => handleSelectTrack(track.spotify_track_id)}
-                      className="h-4 w-4 text-spotify-green focus:ring-spotify-green border-spotify-gray-600 bg-spotify-gray-700 rounded"
-                    />
-                  )}
-                  {renderTableCell('track', 
-                    <div className="flex items-center space-x-3">
-                      <Music className="h-4 w-4 text-spotify-gray-400 flex-shrink-0" />
-                      <div className="min-w-0 flex-1">
-                        <p className="text-white font-medium break-words leading-tight">{track.name}</p>
-                      </div>
-                    </div>
-                  )}
-                  {renderTableCell('artist', 
-                    <p className="text-spotify-gray-300 break-words leading-tight">{track.artist}</p>
-                  )}
-                  {renderTableCell('album', 
-                    <p className="text-spotify-gray-300 break-words leading-tight">{track.album || 'N/A'}</p>
-                  )}
-                  {uniqueClusters.length > 0 && columnVisibility.cluster && 
-                    renderTableCell('cluster',
-                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-900/20 text-blue-300 border border-blue-700/30">
-                        {(() => {
-                          const clusterId = trackClusterMap.get(track.id);
-                          if (clusterId === undefined) return 'N/A';
-                          const cluster = clusters.find(c => c.cluster_id === clusterId);
-                          return cluster?.label || `Cluster ${clusterId}`;
-                        })()}
-                      </span>
-                    )
-                  }
-                  {columnVisibility.popularity && 
-                    renderTableCell('popularity',
-                      <span className="text-spotify-gray-300">{track.popularity ?? 'N/A'}</span>
-                    )
-                  }
-                  {columnVisibility.danceability && 
-                    renderTableCell('danceability',
-                      <span className="text-spotify-gray-300">{formatAudioFeature(track.danceability)}</span>
-                    )
-                  }
-                  {columnVisibility.energy && 
-                    renderTableCell('energy',
-                      <span className="text-spotify-gray-300">{formatAudioFeature(track.energy)}</span>
-                    )
-                  }
-                  {columnVisibility.valence && 
-                    renderTableCell('valence',
-                      <span className="text-spotify-gray-300">{formatAudioFeature(track.valence)}</span>
-                    )
-                  }
-                  {columnVisibility.tempo && 
-                    renderTableCell('tempo',
-                      <span className="text-spotify-gray-300">{formatAudioFeature(track.tempo)}</span>
-                    )
-                  }
-                  {columnVisibility.acousticness && 
-                    renderTableCell('acousticness',
-                      <span className="text-spotify-gray-300">{formatAudioFeature(track.acousticness)}</span>
-                    )
-                  }
-                  {columnVisibility.instrumentalness && 
-                    renderTableCell('instrumentalness',
-                      <span className="text-spotify-gray-300">{formatAudioFeature(track.instrumentalness)}</span>
-                    )
-                  }
-                  {columnVisibility.liveness && 
-                    renderTableCell('liveness',
-                      <span className="text-spotify-gray-300">{formatAudioFeature(track.liveness)}</span>
-                    )
-                  }
-                  {columnVisibility.speechiness && 
-                    renderTableCell('speechiness',
-                      <span className="text-spotify-gray-300">{formatAudioFeature(track.speechiness)}</span>
-                    )
-                  }
-                  {columnVisibility.loudness && 
-                    renderTableCell('loudness',
-                      <span className="text-spotify-gray-300">{formatAudioFeature(track.loudness)}</span>
-                    )
-                  }
-                  {columnVisibility.key && 
-                    renderTableCell('key',
-                      <span className="text-spotify-gray-300">{formatKey(track.key)}</span>
-                    )
-                  }
-                  {columnVisibility.mode && 
-                    renderTableCell('mode',
-                      <span className="text-spotify-gray-300">{formatMode(track.mode)}</span>
-                    )
-                  }
-                </tr>
-              ))}
-              {filteredAndSortedTracks.length === 0 && (
-                <tr>
-                  <td colSpan={20} className="p-8 text-center">
-                    <div className="text-spotify-gray-400">
-                      <Music className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                      <p className="text-lg font-medium mb-2">No tracks found</p>
-                      <p className="text-sm">
-                        {searchQuery ? `No tracks match "${searchQuery}"` : 'No tracks available'}
-                        {selectedCluster !== null && (() => {
-                          const cluster = clusters.find(c => c.cluster_id === selectedCluster);
-                          const label = cluster?.label || `Cluster ${selectedCluster}`;
-                          return ` in ${label}`;
-                        })()}
-                      </p>
-                    </div>
-                  </td>
-                </tr>
+              {columnVisibility.liveness && (
+                <th className="p-3 text-left">{renderSortButton('liveness', 'Live')}</th>
               )}
-            </tbody>
-          </table>
-        </div>
+              {columnVisibility.speechiness && (
+                <th className="p-3 text-left">{renderSortButton('speechiness', 'Speech')}</th>
+              )}
+                {columnVisibility.loudness && 
+                  renderResizableHeader('loudness', renderSortButton('loudness', 'Loud'))
+                }
+                {columnVisibility.key && 
+                  renderResizableHeader('key', renderSortButton('key', 'Key'))
+                }
+                {columnVisibility.mode && 
+                  renderResizableHeader('mode', renderSortButton('mode', 'Mode'))
+                }
+              </tr>
+            </thead>
+            <tbody>
+            {filteredAndSortedTracks.map((track) => (
+              <tr
+                key={track.id}
+                className={`border-b border-spotify-gray-700/50 hover:bg-spotify-gray-700/30 transition-colors ${
+                  selectedTracks.has(track.spotify_track_id) ? 'bg-spotify-green/10' : ''
+                }`}
+              >
+                {renderTableCell('checkbox', 
+                  <input
+                    type="checkbox"
+                    checked={selectedTracks.has(track.spotify_track_id)}
+                    onChange={() => handleSelectTrack(track.spotify_track_id)}
+                    className="h-4 w-4 text-spotify-green focus:ring-spotify-green border-spotify-gray-600 bg-spotify-gray-700 rounded"
+                  />
+                )}
+                {renderTableCell('track', 
+                  <div className="flex items-center space-x-3">
+                    <Music className="h-4 w-4 text-spotify-gray-400 flex-shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-white font-medium break-words">{track.name}</p>
+                    </div>
+                  </div>
+                )}
+                {renderTableCell('artist', 
+                  <p className="text-spotify-gray-300 break-words">{track.artist}</p>
+                )}
+                {renderTableCell('album', 
+                  <p className="text-spotify-gray-300 break-words">{track.album || 'N/A'}</p>
+                )}
+                {uniqueClusters.length > 0 && columnVisibility.cluster && 
+                  renderTableCell('cluster',
+                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-900/20 text-blue-300 border border-blue-700/30 break-words">
+                      {(() => {
+                        const clusterId = trackClusterMap.get(track.id);
+                        if (clusterId === undefined) return 'N/A';
+                        const cluster = clusters.find(c => c.cluster_id === clusterId);
+                        return cluster?.label || `Cluster ${clusterId}`;
+                      })()}
+                    </span>
+                  )
+                }
+                        const cluster = clusters.find(c => c.cluster_id === clusterId);
+                        return cluster?.label || `Cluster ${clusterId}`;
+                      })()}
+                {columnVisibility.popularity && 
+                  renderTableCell('popularity',
+                    <span className="text-spotify-gray-300">{track.popularity ?? 'N/A'}</span>
+                  )
+                }
+                {columnVisibility.danceability && 
+                  renderTableCell('danceability',
+                    <span className="text-spotify-gray-300">{formatAudioFeature(track.danceability)}</span>
+                  )
+                }
+                {columnVisibility.energy && 
+                  renderTableCell('energy',
+                    <span className="text-spotify-gray-300">{formatAudioFeature(track.energy)}</span>
+                  )
+                }
+                {columnVisibility.valence && 
+                  renderTableCell('valence',
+                    <span className="text-spotify-gray-300">{formatAudioFeature(track.valence)}</span>
+                  )
+                }
+                {columnVisibility.tempo && 
+                  renderTableCell('tempo',
+                    <span className="text-spotify-gray-300">{formatAudioFeature(track.tempo)}</span>
+                  )
+                }
+                  </td>
+                )}
+                                {columnVisibility.acousticness && 
+                  renderTableCell('acousticness',
+                    <span className="text-spotify-gray-300">{formatAudioFeature(track.acousticness)}</span>
+                  )
+                }
+                {columnVisibility.instrumentalness && 
+                  renderTableCell('instrumentalness',
+                    <span className="text-spotify-gray-300">{formatAudioFeature(track.instrumentalness)}</span>
+                  )
+                }
+                {columnVisibility.liveness && 
+                  renderTableCell('liveness',
+                    <span className="text-spotify-gray-300">{formatAudioFeature(track.liveness)}</span>
+                  )
+                }
+                {columnVisibility.speechiness && 
+                  renderTableCell('speechiness',
+                    <span className="text-spotify-gray-300">{formatAudioFeature(track.speechiness)}</span>
+                  )
+                }
+                {columnVisibility.loudness && 
+                  renderTableCell('loudness',
+                    <span className="text-spotify-gray-300">{formatAudioFeature(track.loudness)}</span>
+                  )
+                }
+                {columnVisibility.key && 
+                  renderTableCell('key',
+                    <span className="text-spotify-gray-300">{formatKey(track.key)}</span>
+                  )
+                }
+                {columnVisibility.mode && 
+                  renderTableCell('mode',
+                    <span className="text-spotify-gray-300">{formatMode(track.mode)}</span>
+                  )
+                }
+              </tr>
+            ))}
+            {filteredAndSortedTracks.length === 0 && (
+              <tr>
+                <td colSpan={20} className="p-8 text-center">
+                  <div className="text-spotify-gray-400">
+                    <Music className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                    <p className="text-lg font-medium mb-2">No tracks found</p>
+                    <p className="text-sm">
+                      {searchQuery ? `No tracks match "${searchQuery}"` : 'No tracks available'}
+                      {selectedCluster !== null && (() => {
+                        const cluster = clusters.find(c => c.cluster_id === selectedCluster);
+                        const label = cluster?.label || `Cluster ${selectedCluster}`;
+                        return ` in ${label}`;
+                      })()}
+                    </p>
+                  </div>
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
-
-      {/* Bulk Actions Modal */}
-      {showBulkActions && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-spotify-gray-800 rounded-lg p-6 w-full max-w-md mx-4">
-            <h3 className="text-white text-lg font-medium mb-4">
-              Bulk Actions ({selectedTracks.size} tracks selected)
-            </h3>
-            <div className="space-y-3">
-              <button
-                onClick={() => {
-                  if (onBulkAction) {
-                    onBulkAction('move', { trackIds: Array.from(selectedTracks) });
-                  }
-                  setShowBulkActions(false);
-                }}
-                className="w-full px-4 py-2 bg-spotify-green text-white rounded-lg hover:bg-spotify-green/80 transition-colors"
-              >
-                Move to Playlist
-              </button>
-              <button
-                onClick={() => {
-                  if (onBulkAction) {
-                    onBulkAction('delete', { trackIds: Array.from(selectedTracks) });
-                  }
-                  setShowBulkActions(false);
-                }}
-                className="w-full px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-              >
-                Remove from Playlist
-              </button>
-              <button
-                onClick={() => setShowBulkActions(false)}
-                className="w-full px-4 py-2 bg-spotify-gray-600 text-white rounded-lg hover:bg-spotify-gray-500 transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
+
+    {/* Bulk Actions Modal */}
+    {showBulkActions && (
+      <BulkActionsModal
+        selectedTracks={Array.from(selectedTracks)}
+        onClose={() => setShowBulkActions(false)}
+        onAction={onBulkAction}
+      />
+    )}
+  </div>
   );
 }

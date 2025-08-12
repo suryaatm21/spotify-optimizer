@@ -406,14 +406,6 @@ export default function PlaylistStats() {
                               {analysisResult.clusters.length} clusters
                             </p>
                           </div>
-                          {analysisResult.silhouette_score && (
-                            <div className="bg-spotify-gray-700/50 p-4 rounded-lg">
-                              <p className="text-sm text-spotify-gray-300 mb-2">Quality Score:</p>
-                              <p className="font-medium text-yellow-400">
-                                {(analysisResult.silhouette_score * 100).toFixed(1)}%
-                              </p>
-                            </div>
-                          )}
                         </div>
                       ) : (
                         <p className="text-spotify-gray-400 text-sm">

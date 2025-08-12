@@ -42,6 +42,7 @@ export default function BulkActionsModal({
 
   const handleSearchPlaylists = async () => {
     setIsLoading(true);
+    setError(null);
     try {
       const response = await fetch('/api/playlists', {
         headers: {
@@ -49,12 +50,20 @@ export default function BulkActionsModal({
         },
       });
       
-      if (response.ok) {
-        const data = await response.json();
-        setPlaylists(data.filter((p: any) => p.id.toString() !== currentPlaylistId));
+      if (!response.ok) {
+        throw new Error(`Failed to fetch playlists: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      const availablePlaylists = data.filter((p: any) => p.id.toString() !== currentPlaylistId);
+      setPlaylists(availablePlaylists);
+      
+      if (availablePlaylists.length === 0) {
+        setError('No other playlists found in your library');
       }
     } catch (err) {
       console.error('Failed to fetch playlists:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load playlists');
     } finally {
       setIsLoading(false);
     }
@@ -273,22 +282,43 @@ export default function BulkActionsModal({
             <div className="space-y-4">
               <h4 className="font-medium text-white">Select Playlist</h4>
               
-              <div className="max-h-48 overflow-y-auto space-y-2">
-                {playlists.map((playlist) => (
+              {isLoading ? (
+                <div className="text-center py-4">
+                  <div className="text-spotify-gray-400">Loading playlists...</div>
+                </div>
+              ) : error ? (
+                <div className="text-center py-4">
+                  <div className="text-red-400">{error}</div>
                   <button
-                    key={playlist.id}
-                    onClick={() => setSelectedPlaylistId(playlist.id.toString())}
-                    className={`w-full text-left p-3 rounded-lg transition-colors ${
-                      selectedPlaylistId === playlist.id.toString()
-                        ? 'bg-spotify-green/20 border border-spotify-green'
-                        : 'bg-spotify-gray-700 hover:bg-spotify-gray-600'
-                    }`}
+                    onClick={handleSearchPlaylists}
+                    className="mt-2 text-spotify-green hover:underline"
                   >
-                    <p className="text-white font-medium">{playlist.name}</p>
-                    <p className="text-spotify-gray-400 text-sm">{playlist.total_tracks} tracks</p>
+                    Try Again
                   </button>
-                ))}
-              </div>
+                </div>
+              ) : (
+                <div className="max-h-48 overflow-y-auto space-y-2">
+                  {playlists.map((playlist) => (
+                    <button
+                      key={playlist.id}
+                      onClick={() => setSelectedPlaylistId(playlist.id.toString())}
+                      className={`w-full text-left p-3 rounded-lg transition-colors ${
+                        selectedPlaylistId === playlist.id.toString()
+                          ? 'bg-spotify-green/20 border border-spotify-green'
+                          : 'bg-spotify-gray-700 hover:bg-spotify-gray-600'
+                      }`}
+                    >
+                      <p className="text-white font-medium">{playlist.name}</p>
+                      <p className="text-spotify-gray-400 text-sm">{playlist.total_tracks} tracks</p>
+                    </button>
+                  ))}
+                  {playlists.length === 0 && !error && (
+                    <div className="text-center py-4 text-spotify-gray-400">
+                      No other playlists found
+                    </div>
+                  )}
+                </div>
+              )}
               
               <div className="flex space-x-2">
                 <button
