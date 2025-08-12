@@ -293,6 +293,7 @@ async def add_tracks_to_playlist(
     """
     Add tracks to a playlist on Spotify. Provide a list of Spotify track IDs.
     Optionally refresh local DB to reflect changes and return updated tracks.
+    Checks for duplicates and only adds tracks that don't already exist in the playlist.
     """
     playlist = db.query(Playlist).filter(Playlist.id == playlist_id, Playlist.user_id == current_user.id).first()
     if not playlist:
@@ -300,19 +301,57 @@ async def add_tracks_to_playlist(
     if not req.track_ids:
         raise HTTPException(status_code=400, detail="No track IDs provided")
 
-    uris = [f"spotify:track:{tid}" for tid in req.track_ids]
+    # Get existing tracks in the target playlist to check for duplicates
     async with httpx.AsyncClient() as client:
-        headers = {
+        headers = {"Authorization": f"Bearer {current_user.access_token}"}
+        
+        # Fetch existing tracks from Spotify to get current state
+        existing_tracks = []
+        offset = 0
+        limit = 100
+        
+        while True:
+            resp = await client.get(
+                f"https://api.spotify.com/v1/playlists/{playlist.spotify_playlist_id}/tracks",
+                headers=headers,
+                params={"limit": limit, "offset": offset, "fields": "items(track(id)),total,next"}
+            )
+            if resp.status_code != 200:
+                # If we can't fetch existing tracks, proceed without duplicate checking
+                break
+                
+            data = resp.json()
+            for item in data.get("items", []):
+                if item.get("track") and item["track"].get("id"):
+                    existing_tracks.append(item["track"]["id"])
+            
+            if not data.get("next"):
+                break
+            offset += limit
+
+    # Filter out tracks that already exist in the playlist
+    existing_track_ids = set(existing_tracks)
+    new_track_ids = [tid for tid in req.track_ids if tid not in existing_track_ids]
+    
+    if not new_track_ids:
+        # All tracks already exist in the playlist
+        if refresh:
+            current_tracks = await _refresh_playlist_in_db(playlist, current_user, db, audio_features_service)
+            return current_tracks
+        return db.query(Track).filter(Track.playlist_id == playlist.id).all()
+    
+    # Add only the new tracks
+    uris = [f"spotify:track:{tid}" for tid in new_track_ids]
+    resp = await client.post(
+        f"https://api.spotify.com/v1/playlists/{playlist.spotify_playlist_id}/tracks",
+        headers={
             "Authorization": f"Bearer {current_user.access_token}",
             "Content-Type": "application/json",
-        }
-        resp = await client.post(
-            f"https://api.spotify.com/v1/playlists/{playlist.spotify_playlist_id}/tracks",
-            headers=headers,
-            json={"uris": uris},
-        )
-        if resp.status_code not in (200, 201):
-            raise HTTPException(status_code=resp.status_code, detail=f"Spotify add tracks failed: {resp.text}")
+        },
+        json={"uris": uris},
+    )
+    if resp.status_code not in (200, 201):
+        raise HTTPException(status_code=resp.status_code, detail=f"Spotify add tracks failed: {resp.text}")
 
     # Optionally refresh DB
     if refresh:

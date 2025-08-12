@@ -195,6 +195,25 @@ export default function EnhancedStatsTable({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showColumnControls]);
 
+  // Get cluster color for a track - matches ClusterChart color scheme
+  const getClusterColor = (trackId: number) => {
+    const clusterId = trackClusterMap.get(trackId);
+    if (clusterId === undefined) return { bg: 'bg-spotify-gray-600', border: 'border-spotify-gray-500', text: 'text-spotify-gray-300' };
+
+    const colors = [
+      { bg: 'bg-red-500', border: 'border-red-400', text: 'text-red-100' },      // #ef4444
+      { bg: 'bg-blue-500', border: 'border-blue-400', text: 'text-blue-100' },   // #3b82f6
+      { bg: 'bg-emerald-500', border: 'border-emerald-400', text: 'text-emerald-100' }, // #10b981
+      { bg: 'bg-amber-500', border: 'border-amber-400', text: 'text-amber-100' }, // #f59e0b
+      { bg: 'bg-violet-500', border: 'border-violet-400', text: 'text-violet-100' }, // #8b5cf6
+      { bg: 'bg-pink-500', border: 'border-pink-400', text: 'text-pink-100' },   // #ec4899
+      { bg: 'bg-indigo-500', border: 'border-indigo-400', text: 'text-indigo-100' }, // #6366f1
+      { bg: 'bg-orange-500', border: 'border-orange-400', text: 'text-orange-100' }, // #f97316
+    ];
+
+    return colors[clusterId % colors.length] || { bg: 'bg-spotify-gray-600', border: 'border-spotify-gray-500', text: 'text-spotify-gray-300' };
+  };
+
   // Create a map of track ID to cluster ID
   const trackClusterMap = useMemo(() => {
     const map = new Map<number, number>();
@@ -552,14 +571,25 @@ export default function EnhancedStatsTable({
                   )}
                   {uniqueClusters.length > 0 && columnVisibility.cluster && 
                     renderTableCell('cluster',
-                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-900/20 text-blue-300 border border-blue-700/30">
-                        {(() => {
-                          const clusterId = trackClusterMap.get(track.id);
-                          if (clusterId === undefined) return 'N/A';
-                          const cluster = clusters.find(c => c.cluster_id === clusterId);
-                          return cluster?.label || `Cluster ${clusterId}`;
-                        })()}
-                      </span>
+                      (() => {
+                        const clusterId = trackClusterMap.get(track.id);
+                        if (clusterId === undefined) {
+                          return (
+                            <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-spotify-gray-600 text-spotify-gray-300 border border-spotify-gray-500">
+                              N/A
+                            </span>
+                          );
+                        }
+                        
+                        const cluster = clusters.find(c => c.cluster_id === clusterId);
+                        const colors = getClusterColor(track.id);
+                        
+                        return (
+                          <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${colors.bg} ${colors.text} border ${colors.border}`}>
+                            {cluster?.label || `Cluster ${clusterId}`}
+                          </span>
+                        );
+                      })()
                     )
                   }
                   {columnVisibility.popularity && 

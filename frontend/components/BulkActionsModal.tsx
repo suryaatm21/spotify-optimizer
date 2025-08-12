@@ -76,18 +76,11 @@ export default function BulkActionsModal({
     setError(null);
 
     try {
-      // Remove from current playlist
-      for (const trackId of selectedTrackIds) {
-        await fetch(`/api/playlists/${currentPlaylistId}/tracks/${trackId}`, {
-          method: 'DELETE',
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem('access_token')}`,
-          },
-        });
-      }
+      const selectedPlaylist = playlists.find(p => p.id.toString() === selectedPlaylistId);
+      const trackCount = selectedTrackIds.length;
 
-      // Add to target playlist
-      const response = await fetch(`/api/playlists/${selectedPlaylistId}/tracks?refresh=true`, {
+      // Add to target playlist first (with duplicate checking)
+      const addResponse = await fetch(`/api/playlists/${selectedPlaylistId}/tracks?refresh=true`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -98,13 +91,26 @@ export default function BulkActionsModal({
         }),
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to move tracks');
+      if (!addResponse.ok) {
+        throw new Error('Failed to add tracks to target playlist');
+      }
+
+      // Remove from current playlist only after successful addition
+      for (const trackId of selectedTrackIds) {
+        await fetch(`/api/playlists/${currentPlaylistId}/tracks/${trackId}`, {
+          method: 'DELETE',
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem('access_token')}`,
+          },
+        });
       }
 
       // Refresh current playlist data
       mutate(`/api/analytics/playlists/${currentPlaylistId}/tracks`);
       mutate(`/api/analytics/playlists/${currentPlaylistId}/stats`);
+      
+      // Show success message
+      setError(null);
       
       onClose();
     } catch (err) {
