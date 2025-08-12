@@ -11,7 +11,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/analytics", tags=["listening-analytics"])
+router = APIRouter(prefix="/listening-analytics", tags=["listening-analytics"])
 
 # Initialize analytics service
 analytics_service = ListeningAnalyticsService()
@@ -36,7 +36,7 @@ async def get_track_performance(
             )
         
         performance_data = await analytics_service.analyze_track_performance(
-            user_id=current_user.spotify_id,
+            user_id=current_user.spotify_user_id,
             playlist_id=playlist_id,
             db=db,
             access_token=current_user.access_token
@@ -92,7 +92,7 @@ async def get_overskipped_tracks(
             )
         
         overskipped_tracks = await analytics_service.identify_overskipped_tracks(
-            user_id=current_user.spotify_id,
+            user_id=current_user.spotify_user_id,
             playlist_id=playlist_id,
             db=db,
             access_token=current_user.access_token,
@@ -156,7 +156,7 @@ async def get_hidden_gems(
             )
         
         hidden_gems = await analytics_service.find_hidden_gems(
-            user_id=current_user.spotify_id,
+            user_id=current_user.spotify_user_id,
             playlist_id=playlist_id,
             db=db,
             access_token=current_user.access_token,
@@ -207,7 +207,7 @@ async def get_playlist_insights(
         
         # Get track performance data
         performance_data = await analytics_service.analyze_track_performance(
-            user_id=current_user.spotify_id,
+            user_id=current_user.spotify_user_id,
             playlist_id=playlist_id,
             db=db,
             access_token=current_user.access_token
@@ -215,7 +215,7 @@ async def get_playlist_insights(
         
         # Get overskipped tracks
         overskipped = await analytics_service.identify_overskipped_tracks(
-            user_id=current_user.spotify_id,
+            user_id=current_user.spotify_user_id,
             playlist_id=playlist_id,
             db=db,
             access_token=current_user.access_token,
@@ -224,7 +224,7 @@ async def get_playlist_insights(
         
         # Get hidden gems
         hidden_gems = await analytics_service.find_hidden_gems(
-            user_id=current_user.spotify_id,
+            user_id=current_user.spotify_user_id,
             playlist_id=playlist_id,
             db=db,
             access_token=current_user.access_token,
@@ -334,6 +334,114 @@ def _generate_playlist_recommendations(
         })
     
     return recommendations
+
+@router.get("/analyze/{playlist_id}")
+async def analyze_listening_behavior(
+    playlist_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_database)
+) -> Dict[str, Any]:
+    """
+    Comprehensive listening behavior analysis for a playlist.
+    
+    Returns skip rates, engagement patterns, and behavioral insights.
+    """
+    try:
+        if not current_user.access_token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Spotify access token required"
+            )
+        
+        # Get track performance data
+        performance_data = await analytics_service.analyze_track_performance(
+            user_id=current_user.spotify_user_id,
+            playlist_id=playlist_id,
+            db=db,
+            access_token=current_user.access_token
+        )
+        
+        # Calculate overall metrics
+        tracks = performance_data.get("tracks", [])
+        if not tracks:
+            return {
+                "skip_rate": 0.0,
+                "avg_listen_duration": 0,
+                "engagement_score": 0.0,
+                "insights": ["No track data available for analysis"]
+            }
+        
+        # Calculate aggregate metrics
+        skip_rates = [track.get("skip_rate", 0) for track in tracks]
+        durations = [track.get("avg_listen_duration", 0) for track in tracks]
+        
+        overall_skip_rate = sum(skip_rates) / len(skip_rates)
+        avg_duration = sum(durations) / len(durations)
+        engagement_score = 1 - overall_skip_rate
+        
+        # Generate insights
+        insights = []
+        if overall_skip_rate > 0.4:
+            insights.append("High skip rate indicates potential playlist quality issues")
+        if engagement_score > 0.8:
+            insights.append("Strong engagement suggests well-curated playlist")
+        if avg_duration < 60000:  # Less than 1 minute average
+            insights.append("Short listening duration may indicate track mismatch")
+        
+        return {
+            "skip_rate": overall_skip_rate,
+            "avg_listen_duration": avg_duration,
+            "engagement_score": engagement_score,
+            "insights": insights,
+            "track_count": len(tracks)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error analyzing listening behavior: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to analyze listening behavior"
+        )
+
+@router.get("/skip-analysis/{playlist_id}")
+async def get_skip_rate_analysis(
+    playlist_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_database)
+) -> Dict[str, Any]:
+    """
+    Detailed skip rate analysis and patterns.
+    """
+    try:
+        if not current_user.access_token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Spotify access token required"
+            )
+        
+        # Get overskipped tracks analysis
+        overskipped_data = await get_overskipped_tracks(
+            playlist_id=playlist_id,
+            skip_threshold=0.3,
+            current_user=current_user,
+            db=db
+        )
+        
+        return {
+            "playlist_id": playlist_id,
+            "analysis": overskipped_data.get("data", {}),
+            "patterns": {
+                "high_skip_tracks": len(overskipped_data.get("data", {}).get("overskipped_tracks", [])),
+                "avg_skip_rate": overskipped_data.get("data", {}).get("playlist_stats", {}).get("avg_skip_rate", 0)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error analyzing skip patterns: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to analyze skip patterns"
+        )
 
 # Add router to main application
 def include_analytics_router(app):

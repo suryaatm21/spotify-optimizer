@@ -38,10 +38,15 @@ class ListeningAnalyticsService:
             Dict containing track performance analytics
         """
         try:
+            # Get user from database first
+            user = db.query(User).filter(User.spotify_user_id == user_id).first()
+            if not user:
+                raise ValueError(f"User {user_id} not found")
+            
             # Get playlist tracks from database
             playlist = db.query(Playlist).filter(
-                Playlist.spotify_id == playlist_id,
-                Playlist.user_id == user_id
+                Playlist.spotify_playlist_id == playlist_id,
+                Playlist.user_id == user.id
             ).first()
             
             if not playlist:
@@ -58,7 +63,7 @@ class ListeningAnalyticsService:
                 analytics = await self._analyze_single_track(
                     track, recently_played, access_token
                 )
-                track_analytics[track.spotify_id] = analytics
+                track_analytics[track.spotify_track_id] = analytics
             
             # Calculate playlist-level insights
             playlist_insights = self._calculate_playlist_insights(track_analytics)
@@ -226,7 +231,7 @@ class ListeningAnalyticsService:
         access_token: str
     ) -> Dict[str, Any]:
         """Analyze performance metrics for a single track."""
-        track_id = track.spotify_id
+        track_id = track.spotify_track_id
         
         # Find all instances of this track in recently played
         track_plays = [

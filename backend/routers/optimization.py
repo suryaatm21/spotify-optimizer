@@ -11,7 +11,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/optimize", tags=["playlist-optimization"])
+router = APIRouter(prefix="/optimization", tags=["playlist-optimization"])
 
 # Initialize optimization service
 optimization_service = PlaylistOptimizationService()
@@ -54,7 +54,7 @@ async def optimize_playlist(
                 )
         
         optimization_result = await optimization_service.optimize_playlist(
-            user_id=current_user.spotify_id,
+            user_id=current_user.spotify_user_id,
             playlist_id=playlist_id,
             db=db,
             access_token=current_user.access_token,
@@ -97,7 +97,7 @@ async def optimize_playlist_flow(
             )
         
         optimization_result = await optimization_service.optimize_playlist(
-            user_id=current_user.spotify_id,
+            user_id=current_user.spotify_user_id,
             playlist_id=playlist_id,
             db=db,
             access_token=current_user.access_token,
@@ -151,7 +151,7 @@ async def optimize_playlist_quality(
             )
         
         optimization_result = await optimization_service.optimize_playlist(
-            user_id=current_user.spotify_id,
+            user_id=current_user.spotify_user_id,
             playlist_id=playlist_id,
             db=db,
             access_token=current_user.access_token,
@@ -205,7 +205,7 @@ async def optimize_playlist_discovery(
             )
         
         optimization_result = await optimization_service.optimize_playlist(
-            user_id=current_user.spotify_id,
+            user_id=current_user.spotify_user_id,
             playlist_id=playlist_id,
             db=db,
             access_token=current_user.access_token,
@@ -258,7 +258,7 @@ async def get_optimization_summary(
             )
         
         optimization_result = await optimization_service.optimize_playlist(
-            user_id=current_user.spotify_id,
+            user_id=current_user.spotify_user_id,
             playlist_id=playlist_id,
             db=db,
             access_token=current_user.access_token,
@@ -299,4 +299,177 @@ async def get_optimization_summary(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to generate optimization summary"
+        )
+
+@router.get("/recommendations/{playlist_id}")
+async def get_optimization_recommendations(
+    playlist_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_database)
+) -> Dict[str, Any]:
+    """
+    Get comprehensive optimization recommendations for a playlist.
+    """
+    try:
+        if not current_user.access_token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Spotify access token required"
+            )
+        
+        # Use the main optimization endpoint
+        optimization_result = await optimize_playlist(
+            playlist_id=playlist_id,
+            optimization_goals=["flow", "quality", "discovery", "energy"],
+            current_user=current_user,
+            db=db
+        )
+        
+        recommendations = optimization_result.get("data", {}).get("recommendations", [])
+        
+        return {
+            "playlist_id": playlist_id,
+            "recommendations": recommendations,
+            "optimization_score": optimization_result.get("data", {}).get("overall_score", 0.5),
+            "total_recommendations": len(recommendations)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting optimization recommendations: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get optimization recommendations"
+        )
+
+@router.get("/energy-analysis/{playlist_id}")
+async def analyze_energy_transitions(
+    playlist_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_database)
+) -> Dict[str, Any]:
+    """
+    Analyze energy transitions in the playlist.
+    """
+    try:
+        if not current_user.access_token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Spotify access token required"
+            )
+        
+        # Get flow optimization data which includes energy analysis
+        flow_result = await optimize_playlist_flow(
+            playlist_id=playlist_id,
+            current_user=current_user,
+            db=db
+        )
+        
+        flow_data = flow_result.get("data", {})
+        
+        return {
+            "playlist_id": playlist_id,
+            "flow_score": flow_data.get("flow_score", 0.5),
+            "energy_transitions": flow_data.get("transition_analysis", {}),
+            "problematic_transitions": len([t for t in flow_data.get("transition_analysis", {}).get("problematic_transitions", [])]),
+            "recommendations": flow_data.get("recommendations", [])
+        }
+        
+    except Exception as e:
+        logger.error(f"Error analyzing energy transitions: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to analyze energy transitions"
+        )
+
+@router.get("/tempo-flow/{playlist_id}")
+async def optimize_tempo_flow(
+    playlist_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_database)
+) -> Dict[str, Any]:
+    """
+    Get tempo flow optimization suggestions.
+    """
+    try:
+        if not current_user.access_token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Spotify access token required"
+            )
+        
+        # Get flow optimization which includes tempo analysis
+        flow_result = await optimize_playlist_flow(
+            playlist_id=playlist_id,
+            current_user=current_user,
+            db=db
+        )
+        
+        flow_data = flow_result.get("data", {})
+        
+        return {
+            "playlist_id": playlist_id,
+            "tempo_analysis": {
+                "avg_tempo": flow_data.get("avg_tempo", 120),
+                "tempo_variance": flow_data.get("tempo_variance", 0),
+                "tempo_progression": flow_data.get("tempo_progression", "stable")
+            },
+            "recommendations": [r for r in flow_data.get("recommendations", []) if "tempo" in r.get("description", "").lower()],
+            "flow_score": flow_data.get("flow_score", 0.5)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error optimizing tempo flow: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to optimize tempo flow"
+        )
+
+@router.get("/track-replacements/{playlist_id}")
+async def get_track_replacements(
+    playlist_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_database)
+) -> Dict[str, Any]:
+    """
+    Get track replacement suggestions.
+    """
+    try:
+        if not current_user.access_token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Spotify access token required"
+            )
+        
+        # Get quality optimization which includes replacement suggestions
+        quality_result = await optimize_playlist_quality(
+            playlist_id=playlist_id,
+            current_user=current_user,
+            db=db
+        )
+        
+        quality_data = quality_result.get("data", {})
+        recommendations = quality_data.get("recommendations", [])
+        
+        # Filter for replacement-type recommendations
+        replacements = []
+        for rec in recommendations:
+            if rec.get("action_type") in ["replace_track", "remove_track"]:
+                replacements.append({
+                    "current_track": rec.get("track_name", "Unknown Track"),
+                    "suggested_track": rec.get("replacement_suggestion", "Find similar higher-quality track"),
+                    "reason": rec.get("description", "Quality improvement"),
+                    "priority": rec.get("priority", "medium")
+                })
+        
+        return {
+            "playlist_id": playlist_id,
+            "replacements": replacements,
+            "total_suggestions": len(replacements)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting track replacements: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get track replacements"
         )

@@ -11,7 +11,6 @@ from sklearn.cluster import SpectralClustering
 from sklearn.preprocessing import StandardScaler, PowerTransformer
 from sklearn.decomposition import PCA
 from sklearn.metrics import silhouette_score, calinski_harabasz_score
-from kneed import KneeLocator
 import statistics
 import logging
 from sqlalchemy.orm import Session
@@ -56,7 +55,7 @@ class ClusteringService:
         self.audio_features_service = audio_features_service
         self.logger = logging.getLogger(__name__)
     
-    def _preprocess_features(self, tracks: List[Track]) -> Tuple[np.ndarray, Dict[str, Any]]:
+    def _preprocess_features(self, tracks: List[Track]) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
         """
         Enhanced feature preprocessing with log-scaling and smart normalization.
         
@@ -64,12 +63,14 @@ class ClusteringService:
             tracks: List of Track objects with audio features
             
         Returns:
-            Tuple[np.ndarray, Dict[str, Any]]: Processed feature matrix and preprocessing metadata
+            Tuple[np.ndarray, np.ndarray, Dict[str, Any]]: Normalized features for clustering, 
+            raw features for labeling, and preprocessing metadata
             
         Raises:
             ValueError: If no valid features found
         """
         features_data = []
+        raw_features_data = []  # Store raw features for labeling
         preprocessing_info = {
             "log_scaled_features": [],
             "feature_ranges": {},
@@ -78,10 +79,24 @@ class ClusteringService:
         
         for track in tracks:
             track_features = []
+            raw_track_features = []  # Raw features before scaling
+            
             for feature in self.AUDIO_FEATURES:
                 value = getattr(track, feature)
                 if value is not None:
-                    # Apply log scaling for skewed features
+                    # Store raw value for labeling (0-1 scale for most features)
+                    if feature in ["tempo"]:
+                        # Normalize tempo to 0-1 scale for consistent labeling
+                        raw_value = min(max((value - 60) / (200 - 60), 0), 1)
+                    elif feature in ["loudness"]:
+                        # Normalize loudness to 0-1 scale
+                        raw_value = min(max((value + 60) / 60, 0), 1)
+                    else:
+                        # Most features are already 0-1 scale
+                        raw_value = min(max(value, 0), 1)
+                    raw_track_features.append(raw_value)
+                    
+                    # Apply log scaling for clustering features
                     if feature in self.LOG_SCALE_FEATURES and value > 0:
                         if feature == "tempo":
                             # Tempo: log scale and normalize
@@ -97,13 +112,16 @@ class ClusteringService:
                     # Fallback to defaults
                     default_val = self.audio_features_service.FEATURE_DEFAULTS.get(feature, 0.5)
                     track_features.append(default_val)
+                    raw_track_features.append(default_val)
             
             features_data.append(track_features)
+            raw_features_data.append(raw_track_features)
         
         if not features_data:
             raise ValueError("No valid audio features found for clustering")
         
         features_array = np.array(features_data)
+        raw_features_array = np.array(raw_features_data)
         
         # Store feature ranges for interpretation
         for i, feature in enumerate(self.AUDIO_FEATURES):
@@ -133,7 +151,7 @@ class ClusteringService:
         outlier_mask = np.abs(normalized_features) > outlier_threshold
         preprocessing_info["outlier_count"] = int(np.sum(outlier_mask))
         
-        return normalized_features, preprocessing_info
+        return normalized_features, raw_features_array, preprocessing_info
     
     def _find_optimal_clusters(self, features: np.ndarray, max_clusters: int = 8) -> int:
         """
@@ -317,65 +335,228 @@ class ClusteringService:
             Tuple[np.ndarray, Dict[str, Any]]: Cluster labels and algorithm metadata
         """
         algo_metadata = {"method": method}
-        
+
         if method == "kmeans":
             if n_clusters is None:
                 n_clusters = self._find_optimal_clusters(features)
             algo_metadata["n_clusters"] = n_clusters
-            
+
             clusterer = KMeans(
-                n_clusters=n_clusters, 
-                random_state=42, 
+                n_clusters=n_clusters,
+                random_state=42,
                 n_init="auto",
-                max_iter=300
+                max_iter=300,
             )
             cluster_labels = clusterer.fit_predict(features)
             algo_metadata["inertia"] = float(clusterer.inertia_)
-            
+
         elif method == "dbscan":
-            # Auto-tune DBSCAN parameters
+            # Auto-tune DBSCAN parameters - handle small datasets
             from sklearn.neighbors import NearestNeighbors
-            neighbors = NearestNeighbors(n_neighbors=4)
-            neighbors_fit = neighbors.fit(features)
-            distances, indices = neighbors_fit.kneighbors(features)
-            distances = np.sort(distances[:, 3], axis=0)
             
-            # Use elbow method to find optimal eps
-            eps = np.percentile(distances, 75)  # Use 75th percentile as eps
+            n_samples = len(features)
+            n_neighbors = min(4, n_samples - 1)  # Ensure neighbors doesn't exceed samples
             
-            clusterer = DBSCAN(eps=eps, min_samples=max(2, len(features) // 10))
-            cluster_labels = clusterer.fit_predict(features)
-            
-            algo_metadata["eps"] = float(eps)
-            algo_metadata["min_samples"] = clusterer.min_samples
-            algo_metadata["n_clusters"] = len(set(cluster_labels)) - (1 if -1 in cluster_labels else 0)
-            
+            if n_neighbors < 2:
+                # Too few samples for DBSCAN, fall back to KMeans immediately
+                self.logger.warning(f"DBSCAN: dataset too small (n_samples={n_samples}). Falling back to KMeans.")
+                fallback_clusters = min(max(2, n_samples - 1), 2)
+                clusterer = KMeans(n_clusters=fallback_clusters, random_state=42, n_init="auto")
+                cluster_labels = clusterer.fit_predict(features)
+                algo_metadata["fallback_to_kmeans"] = True
+                algo_metadata["fallback_reason"] = f"Dataset too small ({n_samples} samples)"
+                algo_metadata["n_clusters"] = fallback_clusters
+                self.logger.info("DBSCAN->KMeans fallback: k=%d", fallback_clusters)
+            else:
+                neighbors = NearestNeighbors(n_neighbors=n_neighbors)
+                neighbors_fit = neighbors.fit(features)
+                distances, _ = neighbors_fit.kneighbors(features)
+                distances = np.sort(distances[:, n_neighbors-1], axis=0)
+
+                #
+                # Planning (per repo guideline for large files):
+                # - Replace single-percentile eps selection with a small search over percentiles.
+                # - Score each candidate by silhouette and cluster count (prefer 2-6), penalize noise.
+                # - Keep strong guards against eps<=0; if no viable candidate, fallback to KMeans.
+                # - Preserve existing debug prints and metadata (add chosen percentile).
+
+                # Log k-distance distribution for transparency
+                try:
+                    q25 = float(np.percentile(distances, 25))
+                    q50 = float(np.percentile(distances, 50))
+                    q75 = float(np.percentile(distances, 75))
+                    q90 = float(np.percentile(distances, 90))
+                    self.logger.info(
+                        "DBSCAN: n_samples=%d n_neighbors=%d kdist q25=%.4f q50=%.4f q75=%.4f q90=%.4f",
+                        n_samples, n_neighbors, q25, q50, q75, q90
+                    )
+                    print(
+                        f"DBSCAN DEBUG: n_samples={n_samples} n_neighbors={n_neighbors} "
+                        f"kdist q25={q25:.4f} q50={q50:.4f} q75={q75:.4f} q90={q90:.4f}"
+                    )
+                except Exception:
+                    pass
+
+                # Candidate percentiles to search; broad but small set to avoid overfitting
+                candidate_percentiles = [60, 70, 75, 80, 85, 90, 95]
+                min_eps = 1e-4
+                base_min_samples = max(2, len(features) // 10)
+                candidate_min_samples = sorted({base_min_samples, max(3, len(features) // 8)})
+
+                best_score = -1e9
+                best_labels = None
+                best_eps = None
+                best_ms = None
+                best_pct = None
+
+                def safe_eps(pct: float) -> float:
+                    e = float(np.percentile(distances, pct))
+                    if not np.isfinite(e) or e <= 0.0:
+                        non_zero = distances[distances > 0]
+                        if non_zero.size > 0:
+                            e2 = float(np.percentile(non_zero, pct))
+                            self.logger.info(
+                                "DBSCAN: p%(pct).0f(all)=%.6f nonzero_p%(pct).0f=%.6f -> using nonzero",
+                                float(e), e2, extra={}
+                            )
+                            print(f"DBSCAN DEBUG: eps non-positive ({e:.6f}); using nonzero p{int(pct)}={e2:.6f}")
+                            e = e2
+                    if not np.isfinite(e) or e <= 0.0:
+                        e = min_eps
+                        self.logger.info("DBSCAN: eps adjusted to minimum floor %.6f", e)
+                        print(f"DBSCAN DEBUG: eps adjusted to minimum floor {e:.6f}")
+                    return float(e)
+
+                # Try small grid of (eps percentile, min_samples)
+                for pct in candidate_percentiles:
+                    e = safe_eps(pct)
+                    for ms in candidate_min_samples:
+                        try:
+                            trial = DBSCAN(eps=e, min_samples=ms)
+                            labels = trial.fit_predict(features)
+                        except ValueError as ex:
+                            # Skip invalid combos; try next
+                            self.logger.info("DBSCAN trial failed: eps=%.5f ms=%d err=%s", e, ms, str(ex))
+                            print(f"DBSCAN DEBUG: trial failed eps={e:.6f} ms={ms} -> {ex}")
+                            continue
+
+                        # Evaluate
+                        unique = set(labels)
+                        non_noise = [l for l in unique if l != -1]
+                        c = len(non_noise)
+                        noise_ratio = (labels == -1).sum() / len(labels)
+                        if c < 2:
+                            # Degenerate; continue search
+                            continue
+                        try:
+                            sil = silhouette_score(features, labels)
+                        except Exception:
+                            sil = 0.0
+
+                        # Score: prioritize silhouette; light preference for 2-6 clusters; penalize noise
+                        cluster_pref_penalty = 0.06 * max(0, abs(4 - c))  # prefer ~4 clusters softly
+                        noise_penalty = 0.30 * noise_ratio
+                        score = float(sil) - cluster_pref_penalty - noise_penalty
+
+                        if score > best_score:
+                            best_score = score
+                            best_labels = labels
+                            best_eps = e
+                            best_ms = ms
+                            best_pct = pct
+
+                if best_labels is None:
+                    # No viable DBSCAN configuration; fallback to KMeans
+                    self.logger.warning("DBSCAN: no viable configuration found; falling back to KMeans")
+                    print("DBSCAN DEBUG: no viable configuration; fallback to KMeans")
+                    fallback_clusters = min(max(2, len(features) // 15), 5)
+                    clusterer = KMeans(n_clusters=fallback_clusters, random_state=42, n_init="auto")
+                    cluster_labels = clusterer.fit_predict(features)
+                    algo_metadata["fallback_to_kmeans"] = True
+                    algo_metadata["fallback_reason"] = "DBSCAN produced no valid multi-cluster results"
+                    algo_metadata["n_clusters"] = fallback_clusters
+                    self.logger.info("DBSCAN->KMeans fallback: k=%d", fallback_clusters)
+                    print(f"DBSCAN DEBUG: Fallback to KMeans with k={fallback_clusters}")
+                else:
+                    # Use best DBSCAN labels
+                    cluster_labels = best_labels
+                    # Post-check: if excessive noise or too few clusters, fallback to KMeans
+                    non_noise_labels = set([l for l in set(cluster_labels) if l != -1])
+                    noise_ratio = (cluster_labels == -1).sum() / len(cluster_labels)
+                    if len(non_noise_labels) <= 1 or noise_ratio > 0.5:
+                        self.logger.warning(
+                            "DBSCAN: best config still weak (k=%d noise=%.1f%%). Fallback to KMeans. eps=%.4f(p%d) ms=%d",
+                            len(non_noise_labels), noise_ratio * 100.0, best_eps, best_pct or -1, best_ms or -1
+                        )
+                        fallback_clusters = min(max(2, len(features) // 15), 5)
+                        clusterer = KMeans(n_clusters=fallback_clusters, random_state=42, n_init="auto")
+                        cluster_labels = clusterer.fit_predict(features)
+                        algo_metadata["fallback_to_kmeans"] = True
+                        algo_metadata["fallback_reason"] = (
+                            f"Insufficient clusters ({len(non_noise_labels)}) or too much noise ({noise_ratio:.1%})"
+                        )
+                        algo_metadata["n_clusters"] = fallback_clusters
+                        self.logger.info("DBSCAN->KMeans fallback: k=%d", fallback_clusters)
+                        print(f"DBSCAN DEBUG: Fallback to KMeans with k={fallback_clusters}")
+                    else:
+                        # If DBSCAN marked noise (-1), softly assign them to nearest cluster
+                        if (cluster_labels == -1).any():
+                            self.logger.info("DBSCAN: assigning %d noise points to nearest clusters", int((cluster_labels == -1).sum()))
+                            print(f"DBSCAN DEBUG: assigning {(cluster_labels == -1).sum()} noise points")
+                            non_noise_mask = cluster_labels >= 0
+                            unique = sorted(list(set(cluster_labels[non_noise_mask])))
+                            if unique:
+                                centroids = np.vstack([
+                                    features[cluster_labels == lbl].mean(axis=0) for lbl in unique
+                                ])
+                                noise_idx = np.where(cluster_labels == -1)[0]
+                                if len(noise_idx) > 0:
+                                    pts = features[noise_idx]
+                                    x2 = np.sum(pts ** 2, axis=1, keepdims=True)
+                                    c2 = np.sum(centroids ** 2, axis=1, keepdims=True).T
+                                    xc = pts @ centroids.T
+                                    d2 = x2 + c2 - 2 * xc
+                                    nearest = d2.argmin(axis=1)
+                                    for i, idx in enumerate(noise_idx):
+                                        cluster_labels[idx] = unique[nearest[i]]
+
+                        # Convert to 1-based indices for UI consistency (DBSCAN only)
+                        cluster_labels = cluster_labels + 1
+                        algo_metadata["eps"] = float(best_eps) if best_eps is not None else None
+                        algo_metadata["min_samples"] = int(best_ms) if best_ms is not None else None
+                        algo_metadata["eps_percentile"] = int(best_pct) if best_pct is not None else None
+                        # Exclude noise (-1) which is now 0 after +1; count only positive labels
+                        n_unique = len(set([lbl for lbl in cluster_labels if lbl > 0]))
+                        algo_metadata["n_clusters"] = n_unique
+                        self.logger.info("DBSCAN: produced %d clusters (excl. noise)", n_unique)
+                        print(f"DBSCAN DEBUG: produced {n_unique} clusters (1-based labels)")
+
         elif method == "gaussian_mixture":
             if n_clusters is None:
                 n_clusters = self._find_optimal_clusters(features)
             algo_metadata["n_clusters"] = n_clusters
-            
+
             clusterer = GaussianMixture(n_components=n_clusters, random_state=42)
             clusterer.fit(features)
             cluster_labels = clusterer.predict(features)
             algo_metadata["aic"] = float(clusterer.aic(features))
             algo_metadata["bic"] = float(clusterer.bic(features))
-            
+
         elif method == "spectral":
             if n_clusters is None:
                 n_clusters = self._find_optimal_clusters(features)
             algo_metadata["n_clusters"] = n_clusters
-            
+
             clusterer = SpectralClustering(
-                n_clusters=n_clusters, 
+                n_clusters=n_clusters,
                 random_state=42,
-                affinity='rbf'
+                affinity="rbf",
             )
             cluster_labels = clusterer.fit_predict(features)
-            
+
         else:
             raise ValueError(f"Unsupported clustering method: {method}")
-        
+
         return cluster_labels, algo_metadata
     
     def _label_cluster(self, center_features: Dict[str, float]) -> str:
@@ -395,7 +576,7 @@ class ClusteringService:
         instrumentalness = center_features.get("instrumentalness", 0.5)
         tempo = center_features.get("tempo", 120)
         
-        # High energy combinations
+    # High energy combinations
         if energy > 0.7:
             if valence > 0.7:
                 if danceability > 0.7:
@@ -433,6 +614,37 @@ class ClusteringService:
                 return "Bittersweet songs"
             else:
                 return "Balanced mix"
+
+    def _deduplicate_labels(self, clusters: List[ClusterData]) -> None:
+        """
+        Ensure cluster labels are unique by appending a short descriptor when duplicates occur.
+
+        Args:
+            clusters: list of ClusterData with initial labels
+        """
+        label_counts: Dict[str, int] = {}
+        for c in clusters:
+            base = c.label or "Cluster"
+            label_counts[base] = label_counts.get(base, 0) + 1
+
+        if all(cnt == 1 for cnt in label_counts.values()):
+            return
+
+        # Build compact descriptors from a couple of salient features
+        def descriptor(c: ClusterData) -> str:
+            e = c.center_features.get("energy", 0.5)
+            d = c.center_features.get("danceability", 0.5)
+            v = c.center_features.get("valence", 0.5)
+            # Map to coarse buckets 1-5
+            bucket = lambda x: int(min(5, max(1, round(x * 5))))
+            return f"E{bucket(e)}-D{bucket(d)}-V{bucket(v)}"
+
+        seen: Dict[str, int] = {}
+        for c in clusters:
+            base = c.label or "Cluster"
+            if label_counts[base] > 1:
+                seen[base] = seen.get(base, 0) + 1
+                c.label = f"{base} ({descriptor(c)})"
     
     async def prepare_tracks_for_analysis(
         self, 
@@ -499,8 +711,8 @@ class ClusteringService:
         if len(tracks) < 2:
             raise ValueError("Need at least 2 tracks for clustering")
         
-        # Enhanced feature preprocessing
-        features, preprocessing_info = self._preprocess_features(tracks)
+        # Enhanced feature preprocessing - now returns raw features for labeling
+        features, raw_features, preprocessing_info = self._preprocess_features(tracks)
         
         # Apply clustering algorithm with automatic parameter selection
         cluster_labels, algo_metadata = self._apply_clustering_algorithm(
@@ -509,10 +721,25 @@ class ClusteringService:
         
         # Calculate clustering quality metrics
         unique_labels = set(cluster_labels)
-        if len(unique_labels) > 1:
-            silhouette_avg = silhouette_score(features, cluster_labels)
-            calinski_score = calinski_harabasz_score(features, cluster_labels)
+        n_clusters_found = len(unique_labels)
+        n_samples = len(features)
+        if n_clusters_found > 1 and n_clusters_found < n_samples:
+            try:
+                silhouette_avg = silhouette_score(features, cluster_labels)
+            except ValueError as e:
+                # Robustness: if sklearn rejects the label configuration, default to 0
+                self.logger.warning(f"Silhouette skipped: {e}")
+                silhouette_avg = 0.0
+            try:
+                calinski_score = calinski_harabasz_score(features, cluster_labels)
+            except ValueError as e:
+                self.logger.warning(f"Calinski-Harabasz skipped: {e}")
+                calinski_score = 0.0
         else:
+            if n_clusters_found >= n_samples:
+                self.logger.info(
+                    f"Skipping cluster quality metrics: n_clusters={n_clusters_found} >= n_samples={n_samples}"
+                )
             silhouette_avg = 0.0
             calinski_score = 0.0
         
@@ -528,26 +755,26 @@ class ClusteringService:
         for cluster_id, cluster_tracks in clusters_dict.items():
             track_indices = [idx for idx, _ in cluster_tracks]
             cluster_features = features[track_indices]
+            cluster_raw_features = raw_features[track_indices]  # Use raw features for labeling
             
-            # Calculate center features (mean of normalized features)
-            center_features_norm = np.mean(cluster_features, axis=0)
+            # Calculate center features using raw features for interpretable labeling
+            center_features_raw = np.mean(cluster_raw_features, axis=0)
             
-            # Convert back to interpretable feature values
+            # Convert to interpretable feature dictionary using raw feature scales
             center_dict = {}
             for i, feature in enumerate(self.AUDIO_FEATURES):
-                # Reverse the preprocessing to get interpretable values
-                raw_value = float(center_features_norm[i])
-                
-                # Reverse feature weight
-                weight = self.FEATURE_WEIGHTS.get(feature, 1.0)
-                if weight != 0:
-                    raw_value /= weight
-                
-                # Store for interpretation (these are still somewhat normalized)
-                center_dict[feature] = raw_value
+                # Use raw feature values which are already on 0-1 scale
+                center_dict[feature] = float(center_features_raw[i])
             
-            # Generate interpretable label
+            # Generate interpretable label using raw features
             cluster_label = self._label_cluster(center_dict)
+            
+            # Log cluster characteristics for debugging
+            energy = center_dict.get("energy", 0.5)
+            valence = center_dict.get("valence", 0.5)
+            danceability = center_dict.get("danceability", 0.5)
+            self.logger.info(f"Cluster {cluster_id} ({cluster_label}): "
+                           f"Energy={energy:.3f}, Valence={valence:.3f}, Dance={danceability:.3f}")
             
             cluster_data = ClusterData(
                 cluster_id=int(cluster_id) if cluster_id >= 0 else -1,  # DBSCAN can have -1 (noise)
@@ -558,10 +785,13 @@ class ClusteringService:
             )
             
             clusters.append(cluster_data)
-        
+
         # Sort clusters by size (descending)
         clusters.sort(key=lambda x: x.track_count, reverse=True)
-        
+
+        # Ensure labels are unique to avoid repeated names when K grows
+        self._deduplicate_labels(clusters)
+
         # Create comprehensive analysis metadata
         analysis_metadata = {
             "algorithm": algo_metadata,
@@ -569,13 +799,13 @@ class ClusteringService:
             "quality_metrics": {
                 "silhouette_score": float(silhouette_avg),
                 "calinski_harabasz_score": float(calinski_score),
-                "n_clusters": len(unique_labels),
-                "noise_points": int(sum(1 for label in cluster_labels if label == -1))
+                "n_clusters": n_clusters_found,
+                "noise_points": int(sum(1 for label in cluster_labels if label == -1)),
             },
             "feature_importance": dict(self.FEATURE_WEIGHTS),
-            "data_quality": quality_report
+            "data_quality": quality_report,
         }
-        
+
         return clusters, silhouette_avg, analysis_metadata
     
     def calculate_playlist_stats(self, tracks: List[Track]) -> PlaylistStats:
@@ -705,7 +935,7 @@ class ClusteringService:
         if len(tracks) < 2:
             return []
         
-        features, _ = self._preprocess_features(tracks)
+        features, _, _ = self._preprocess_features(tracks)
         
         # Create a fresh PCA instance with full SVD for maximum determinism
         # Full SVD is more deterministic than randomized SVD
@@ -743,3 +973,173 @@ class ClusteringService:
         coordinates.sort(key=lambda x: next(i for i, t in enumerate(tracks) if t.id == x["track_id"]))
         
         return coordinates
+
+    def enhanced_cluster_analysis(
+        self,
+        tracks: List[Track],
+        algorithm: str = "kmeans",
+        num_clusters: Optional[int] = None,
+        quality_report: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Enhanced clustering analysis with automatic optimization and interpretable labels.
+        
+        Args:
+            tracks: List of Track objects to cluster
+            algorithm: Clustering algorithm to use
+            num_clusters: Number of clusters (auto-detected if None)
+            quality_report: Optional data quality report
+            
+        Returns:
+            Dict containing clusters, scores, and metadata
+        """
+        if len(tracks) < 2:
+            raise ValueError("Need at least 2 tracks for clustering")
+
+        # Run clustering analysis
+        clusters, silhouette_score, analysis_metadata = self.cluster_tracks(
+            tracks, method=algorithm, n_clusters=num_clusters, quality_report=quality_report
+        )
+
+        # Extract cluster labels for interpretability
+        cluster_labels = {}
+        for cluster in clusters:
+            cluster_labels[f"cluster_{cluster.cluster_id}"] = cluster.label
+
+        return {
+            "clusters": clusters,
+            "silhouette_score": silhouette_score,
+            "optimal_clusters": analysis_metadata.get("optimal_clusters"),
+            "cluster_labels": cluster_labels,
+            "analysis_metadata": analysis_metadata
+        }
+
+    def get_cluster_recommendations(
+        self,
+        tracks: List[Track],
+        quality_report: Optional[Dict[str, Any]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Generate cluster-based recommendations for improving playlist flow.
+        
+        Args:
+            tracks: List of Track objects
+            quality_report: Optional data quality report
+            
+        Returns:
+            List of recommendation dictionaries
+        """
+        if len(tracks) < 3:
+            return []
+
+        # Run clustering to identify patterns
+        clusters, silhouette_score, metadata = self.cluster_tracks(tracks)
+        
+        recommendations = []
+        
+        # Analyze cluster distribution
+        cluster_sizes = [len(cluster.tracks) for cluster in clusters]
+        avg_cluster_size = np.mean(cluster_sizes)
+        
+        # Recommend cluster balancing if needed
+        for i, cluster in enumerate(clusters):
+            if len(cluster.tracks) < avg_cluster_size * 0.5:
+                recommendations.append({
+                    "type": "cluster_balance",
+                    "priority": "medium",
+                    "description": f"Cluster {i+1} ({cluster.label}) has only {len(cluster.tracks)} tracks. Consider adding similar tracks.",
+                    "cluster_id": cluster.cluster_id,
+                    "cluster_label": cluster.label,
+                    "suggested_action": "add_similar_tracks"
+                })
+            elif len(cluster.tracks) > avg_cluster_size * 2:
+                recommendations.append({
+                    "type": "cluster_balance",
+                    "priority": "low",
+                    "description": f"Cluster {i+1} ({cluster.label}) is very large with {len(cluster.tracks)} tracks. Consider splitting or diversifying.",
+                    "cluster_id": cluster.cluster_id,
+                    "cluster_label": cluster.label,
+                    "suggested_action": "diversify_cluster"
+                })
+
+        # Recommend flow improvements based on clustering
+        if silhouette_score < 0.3:
+            recommendations.append({
+                "type": "clustering_quality",
+                "priority": "high",
+                "description": f"Low clustering quality (score: {silhouette_score:.2f}). Playlist may lack coherent themes.",
+                "suggested_action": "improve_coherence",
+                "current_score": silhouette_score
+            })
+
+        return recommendations
+
+    def get_cluster_statistics(
+        self,
+        tracks: List[Track],
+        algorithm: str = "kmeans",
+        quality_report: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Get detailed cluster statistics and insights.
+        
+        Args:
+            tracks: List of Track objects
+            algorithm: Clustering algorithm used
+            quality_report: Optional data quality report
+            
+        Returns:
+            Dictionary containing detailed statistics
+        """
+        if len(tracks) < 2:
+            return {"error": "Need at least 2 tracks for statistics"}
+
+        # Run clustering analysis
+        clusters, silhouette_score, metadata = self.cluster_tracks(
+            tracks, method=algorithm, quality_report=quality_report
+        )
+
+        # Calculate comprehensive statistics
+        stats = {
+            "algorithm": algorithm,
+            "total_tracks": len(tracks),
+            "num_clusters": len(clusters),
+            "silhouette_score": silhouette_score,
+            "cluster_distribution": [],
+            "feature_analysis": {},
+            "quality_metrics": {
+                "silhouette_score": silhouette_score,
+                "calinski_harabasz_score": metadata.get("calinski_score", 0)
+            }
+        }
+
+        # Cluster distribution analysis
+        for cluster in clusters:
+            cluster_stats = {
+                "cluster_id": cluster.cluster_id,
+                "label": cluster.label,
+                "track_count": len(cluster.tracks),
+                "percentage": (len(cluster.tracks) / len(tracks)) * 100,
+                "avg_features": {}
+            }
+            
+            # Calculate average features for this cluster
+            if cluster.tracks:
+                for feature in self.AUDIO_FEATURES:
+                    values = [getattr(track, feature, 0) or 0 for track in cluster.tracks]
+                    cluster_stats["avg_features"][feature] = np.mean(values) if values else 0
+                    
+            stats["cluster_distribution"].append(cluster_stats)
+
+        # Overall feature analysis
+        for feature in self.AUDIO_FEATURES:
+            values = [getattr(track, feature, 0) or 0 for track in tracks]
+            if values:
+                stats["feature_analysis"][feature] = {
+                    "mean": np.mean(values),
+                    "std": np.std(values),
+                    "min": np.min(values),
+                    "max": np.max(values)
+                }
+
+        return stats

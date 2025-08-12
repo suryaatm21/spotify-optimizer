@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
 import httpx
 import json
+import logging
 
 from backend.dependencies import (
     get_database, get_current_user, get_clustering_service, 
@@ -20,6 +21,7 @@ from ..services.clustering import ClusteringService
 from ..services.audio_features import AudioFeaturesService
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 async def _fetch_and_store_playlist_tracks(
     playlist: Playlist, 
@@ -290,6 +292,19 @@ async def analyze_playlist(
     """
     Analyze a playlist using machine learning clustering.
     """
+    # Log incoming request
+    try:
+        logger.info(
+            "Analyze request received: playlist_id=%s method=%s cluster_count=%s fetch_missing=%s",
+            playlist_id,
+            analysis_request.cluster_method,
+            analysis_request.cluster_count,
+            analysis_request.fetch_missing_features,
+        )
+    except Exception:
+        # Non-fatal logging error safeguard
+        pass
+
     playlist = db.query(Playlist).filter(Playlist.id == playlist_id, Playlist.user_id == current_user.id).first()
     if not playlist:
         raise HTTPException(status_code=404, detail="Playlist not found")
@@ -304,6 +319,18 @@ async def analyze_playlist(
         user_access_token=current_user.access_token
     )
 
+    # Log preparation/quality results
+    try:
+        logger.info(
+            "Prepared %s tracks for analysis (initial=%.2f final=%.2f improvement=%.2f)",
+            len(prepared_tracks),
+            quality_report.get("initial_quality", {}).get("overall_completeness", 0.0),
+            quality_report.get("final_quality", {}).get("overall_completeness", 0.0),
+            quality_report.get("improvement", 0.0),
+        )
+    except Exception:
+        pass
+
     try:
         clusters, silhouette_score, analysis_metadata = clustering_service.cluster_tracks(
             prepared_tracks, 
@@ -312,6 +339,8 @@ async def analyze_playlist(
             quality_report=quality_report
         )
     except ValueError as e:
+        # Log and surface algorithm errors (e.g., DBSCAN parameter issues)
+        logger.warning("Clustering failed for playlist %s with method %s: %s", playlist_id, analysis_request.cluster_method, str(e))
         raise HTTPException(status_code=400, detail=str(e))
 
     # Convert ClusterData objects to dictionaries for JSON serialization
@@ -333,6 +362,34 @@ async def analyze_playlist(
     db.refresh(analysis_record)
 
     pca_coordinates = clustering_service.get_pca_coordinates(prepared_tracks)
+
+    # Log algorithm decisions/outcome (compact)
+    try:
+        algo = (analysis_metadata or {}).get("algorithm", {})
+        qual = (analysis_metadata or {}).get("quality_metrics", {})
+        logger.info(
+            "Analysis outcome: method=%s k=%s eps=%s min_samples=%s fallback=%s reason=%s clusters=%s silhouette=%.3f",
+            algo.get("method"),
+            algo.get("n_clusters"),
+            algo.get("eps"),
+            algo.get("min_samples"),
+            algo.get("fallback_to_kmeans", False),
+            algo.get("fallback_reason"),
+            len(clusters_dict),
+            float(qual.get("silhouette_score", 0.0)),
+        )
+        # Also print a compact line for dev consoles that might filter Python loggers
+        print(
+            "ANALYZE DEBUG:",
+            f"method={algo.get('method')} k={algo.get('n_clusters')} eps={algo.get('eps')}",
+            f"min_samples={algo.get('min_samples')} fallback={algo.get('fallback_to_kmeans', False)}",
+            f"clusters={len(clusters_dict)} silhouette={float(qual.get('silhouette_score', 0.0)):.3f}"
+        )
+        # Also log top-3 cluster labels to verify UI mapping
+        top_labels = [c.get("label") for c in clusters_dict[:3]]
+        logger.info("Top cluster labels: %s", top_labels)
+    except Exception:
+        pass
 
     # Handle the data quality report structure
     data_quality_obj = None
