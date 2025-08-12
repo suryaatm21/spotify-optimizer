@@ -33,6 +33,37 @@ class PlaylistUpdateInput(BaseModel):
 class AddTracksRequest(BaseModel):
     track_ids: List[str]
 
+@router.get("/search")
+async def search_tracks(
+    q: str = Query(..., description="Search query"),
+    type: str = Query("track", description="Search type"),
+    limit: int = Query(20, description="Number of results"),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Search for tracks using Spotify API.
+    """
+    async with httpx.AsyncClient() as client:
+        headers = {"Authorization": f"Bearer {current_user.access_token}"}
+        
+        response = await client.get(
+            "https://api.spotify.com/v1/search",
+            headers=headers,
+            params={
+                "q": q,
+                "type": type,
+                "limit": limit
+            }
+        )
+        
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Spotify search failed: {response.text}"
+            )
+        
+        return response.json()
+
 async def _refresh_playlist_in_db(
     playlist: Playlist,
     current_user: User,
@@ -155,6 +186,23 @@ async def create_playlist(
     db.add(playlist)
     db.commit()
     db.refresh(playlist)
+    return playlist
+
+@router.get("/playlists/{playlist_id}", response_model=PlaylistResponse)
+async def get_playlist(
+    playlist_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_database)
+):
+    """Get playlist metadata by ID."""
+    playlist = db.query(Playlist).filter(
+        Playlist.id == playlist_id, 
+        Playlist.user_id == current_user.id
+    ).first()
+    
+    if not playlist:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+    
     return playlist
 
 @router.put("/playlists/{playlist_id}", response_model=PlaylistResponse)

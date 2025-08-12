@@ -5,7 +5,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { ArrowLeft, Play, BarChart3, Loader2, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Play, BarChart3, Loader2, RefreshCw, Settings } from 'lucide-react';
 import useSWR from 'swr';
 
 import Layout from '@/components/Layout';
@@ -14,10 +14,13 @@ import ClusterChart from '@/components/ClusterChart';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import ErrorMessage from '@/components/ErrorMessage';
 import OptimizationPanel from '@/components/OptimizationPanel';
+import PlaylistManager from '@/components/PlaylistManager';
+import TrackManager from '@/components/TrackManager';
 import { useAuth } from '@/hooks/useAuth';
 import { fetcher } from '@/lib/api';
 import {
   ITrack,
+  IPlaylist,
   IPlaylistStats,
   IAnalysisResult,
   IOptimizationSuggestion,
@@ -33,6 +36,9 @@ export default function PlaylistStats() {
     'kmeans',
   );
   const [clusterCount, setClusterCount] = useState(3);
+
+  // CRUD Management State
+  const [activeTab, setActiveTab] = useState<'analysis' | 'playlist' | 'tracks'>('analysis');
 
   // Ensure component is mounted before using router
   useEffect(() => {
@@ -64,6 +70,16 @@ export default function PlaylistStats() {
     fetcher,
   );
 
+  // Fetch playlist metadata for CRUD operations
+  const {
+    data: playlistMeta,
+    error: playlistError,
+    isLoading: playlistLoading,
+  } = useSWR<IPlaylist>(
+    playlistId ? `/api/playlists/${playlistId}` : null,
+    fetcher,
+  );
+
   // Fetch optimization suggestions - DISABLED to prevent 501 errors from disabled endpoint
   // const {
   //   data: optimizations,
@@ -78,6 +94,15 @@ export default function PlaylistStats() {
   const [analysisResult, setAnalysisResult] = useState<IAnalysisResult | null>(
     null,
   );
+
+  // Callback for when playlist/tracks are updated
+  const handleDataUpdated = () => {
+    // Re-fetch the data
+    if (playlistId) {
+      // Clear analysis result since track data may have changed
+      setAnalysisResult(null);
+    }
+  };
 
   const handleAnalyzePlaylist = async () => {
     if (!playlistId) return;
@@ -150,7 +175,7 @@ export default function PlaylistStats() {
   }
 
   // Show loading state
-  if (tracksLoading || statsLoading) {
+  if (tracksLoading || statsLoading || playlistLoading) {
     return (
       <Layout
         title="Loading Playlist..."
@@ -163,7 +188,7 @@ export default function PlaylistStats() {
   }
 
   // Show error state
-  if (tracksError || statsError) {
+  if (tracksError || statsError || playlistError) {
     return (
       <Layout
         title="Error Loading Playlist"
@@ -329,15 +354,100 @@ export default function PlaylistStats() {
               )}
             </div>
 
-            {/* Right Column - Optimization Suggestions */}
+            {/* Right Column - Management & Optimization */}
             <div className="space-y-8">
-              {/* Optimization panel disabled - endpoint temporarily unavailable */}
-              {/* {optimizations && (
-                <OptimizationPanel
-                  suggestions={optimizations.suggestions}
-                  onRefresh={refreshOptimizations}
-                />
-              )} */}
+              {/* Management Tabs */}
+              <div className="bg-spotify-gray-800/50 backdrop-blur-sm rounded-xl border border-spotify-gray-700">
+                {/* Tab Navigation */}
+                <div className="flex border-b border-spotify-gray-700">
+                  <button
+                    onClick={() => setActiveTab('analysis')}
+                    className={`px-4 py-3 text-sm font-medium transition-colors ${
+                      activeTab === 'analysis'
+                        ? 'text-spotify-green border-b-2 border-spotify-green'
+                        : 'text-spotify-gray-400 hover:text-white'
+                    }`}
+                  >
+                    Analysis
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('playlist')}
+                    className={`px-4 py-3 text-sm font-medium transition-colors ${
+                      activeTab === 'playlist'
+                        ? 'text-spotify-green border-b-2 border-spotify-green'
+                        : 'text-spotify-gray-400 hover:text-white'
+                    }`}
+                  >
+                    <Settings className="w-4 h-4 inline mr-1" />
+                    Playlist
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('tracks')}
+                    className={`px-4 py-3 text-sm font-medium transition-colors ${
+                      activeTab === 'tracks'
+                        ? 'text-spotify-green border-b-2 border-spotify-green'
+                        : 'text-spotify-gray-400 hover:text-white'
+                    }`}
+                  >
+                    Tracks
+                  </button>
+                </div>
+
+                {/* Tab Content */}
+                <div className="p-6">
+                  {activeTab === 'analysis' && (
+                    <div className="text-white">
+                      <h3 className="text-lg font-semibold mb-4">Analysis Results</h3>
+                      {analysisResult ? (
+                        <div className="space-y-4">
+                          <div className="bg-spotify-gray-700/50 p-4 rounded-lg">
+                            <p className="text-sm text-spotify-gray-300 mb-2">Method Used:</p>
+                            <p className="font-medium text-spotify-green capitalize">
+                              {analysisResult.cluster_method}
+                            </p>
+                          </div>
+                          <div className="bg-spotify-gray-700/50 p-4 rounded-lg">
+                            <p className="text-sm text-spotify-gray-300 mb-2">Clusters Found:</p>
+                            <p className="font-medium text-blue-400">
+                              {analysisResult.clusters.length} clusters
+                            </p>
+                          </div>
+                          {analysisResult.silhouette_score && (
+                            <div className="bg-spotify-gray-700/50 p-4 rounded-lg">
+                              <p className="text-sm text-spotify-gray-300 mb-2">Quality Score:</p>
+                              <p className="font-medium text-yellow-400">
+                                {(analysisResult.silhouette_score * 100).toFixed(1)}%
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-spotify-gray-400 text-sm">
+                          Run analysis to see results here
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {activeTab === 'playlist' && playlistMeta && (
+                    <PlaylistManager
+                      playlistId={playlistId}
+                      playlistName={playlistMeta.name}
+                      playlistDescription={playlistMeta.description}
+                      isPublic={playlistMeta.is_public}
+                      onPlaylistUpdated={handleDataUpdated}
+                    />
+                  )}
+
+                  {activeTab === 'tracks' && (
+                    <TrackManager
+                      playlistId={playlistId}
+                      tracks={tracks}
+                      onTracksUpdated={handleDataUpdated}
+                    />
+                  )}
+                </div>
+              </div>
             </div>
           </div>
 
