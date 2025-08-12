@@ -1,7 +1,7 @@
 /**
  * BulkActionsModal - Modal for handling bulk track operations
  */
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { X, Move, Trash2, Plus, Search } from 'lucide-react';
 import { mutate } from 'swr';
 
@@ -29,6 +29,7 @@ export default function BulkActionsModal({
   const [action, setAction] = useState<'move' | 'delete' | 'create-and-move' | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [playlists, setPlaylists] = useState<any[]>([]);
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<string>('');
@@ -39,6 +40,23 @@ export default function BulkActionsModal({
     description: '',
     is_public: true,
   });
+
+  // Reset state when modal opens/closes
+  useEffect(() => {
+    if (isOpen) {
+      setAction(null);
+      setError(null);
+      setSuccessMessage(null);
+      setSearchQuery('');
+      setSelectedPlaylistId('');
+      setPlaylists([]);
+      setCreateForm({
+        name: '',
+        description: '',
+        is_public: true,
+      });
+    }
+  }, [isOpen]);
 
   const handleSearchPlaylists = async () => {
     setIsLoading(true);
@@ -79,8 +97,8 @@ export default function BulkActionsModal({
       const selectedPlaylist = playlists.find(p => p.id.toString() === selectedPlaylistId);
       const trackCount = selectedTrackIds.length;
 
-      // Add to target playlist first (with duplicate checking)
-      const addResponse = await fetch(`/api/playlists/${selectedPlaylistId}/tracks?refresh=true`, {
+            // Add to existing playlist
+      const response = await fetch(`/api/playlists/${selectedPlaylistId}/tracks?refresh=true`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -91,13 +109,13 @@ export default function BulkActionsModal({
         }),
       });
 
-      if (!addResponse.ok) {
+      if (!response.ok) {
         throw new Error('Failed to add tracks to target playlist');
       }
 
       // Remove from current playlist only after successful addition
       for (const trackId of selectedTrackIds) {
-        await fetch(`/api/playlists/${currentPlaylistId}/tracks/${trackId}`, {
+        await fetch(`/api/playlists/${currentPlaylistId}/tracks/${trackId}?refresh=true`, {
           method: 'DELETE',
           headers: {
             Authorization: `Bearer ${localStorage.getItem('access_token')}`,
@@ -105,14 +123,20 @@ export default function BulkActionsModal({
         });
       }
 
-      // Refresh current playlist data
+      // Refresh both source and target playlist data
       mutate(`/api/analytics/playlists/${currentPlaylistId}/tracks`);
       mutate(`/api/analytics/playlists/${currentPlaylistId}/stats`);
+      mutate(`/api/analytics/playlists/${selectedPlaylistId}/tracks`);
+      mutate(`/api/analytics/playlists/${selectedPlaylistId}/stats`);
       
       // Show success message
       setError(null);
+      setSuccessMessage(`Successfully moved ${selectedTrackIds.length} track${selectedTrackIds.length !== 1 ? 's' : ''} to playlist!`);
       
-      onClose();
+      // Close modal after a short delay
+      setTimeout(() => {
+        onClose();
+      }, 1500);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to move tracks');
     } finally {
@@ -148,7 +172,7 @@ export default function BulkActionsModal({
 
       // Remove from current playlist
       for (const trackId of selectedTrackIds) {
-        await fetch(`/api/playlists/${currentPlaylistId}/tracks/${trackId}`, {
+        await fetch(`/api/playlists/${currentPlaylistId}/tracks/${trackId}?refresh=true`, {
           method: 'DELETE',
           headers: {
             Authorization: `Bearer ${localStorage.getItem('access_token')}`,
@@ -173,7 +197,13 @@ export default function BulkActionsModal({
       mutate(`/api/analytics/playlists/${currentPlaylistId}/stats`);
       mutate('/api/playlists');
       
-      onClose();
+      setError(null);
+      setSuccessMessage(`Successfully created playlist "${createForm.name}" and moved ${selectedTrackIds.length} track${selectedTrackIds.length !== 1 ? 's' : ''}!`);
+      
+      // Close modal after a short delay
+      setTimeout(() => {
+        onClose();
+      }, 1500);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create playlist and move tracks');
     } finally {
@@ -193,7 +223,7 @@ export default function BulkActionsModal({
 
     try {
       for (const trackId of selectedTrackIds) {
-        await fetch(`/api/playlists/${currentPlaylistId}/tracks/${trackId}`, {
+        await fetch(`/api/playlists/${currentPlaylistId}/tracks/${trackId}?refresh=true`, {
           method: 'DELETE',
           headers: {
             Authorization: `Bearer ${localStorage.getItem('access_token')}`,
@@ -205,7 +235,13 @@ export default function BulkActionsModal({
       mutate(`/api/analytics/playlists/${currentPlaylistId}/tracks`);
       mutate(`/api/analytics/playlists/${currentPlaylistId}/stats`);
       
-      onClose();
+      setError(null);
+      setSuccessMessage(`Successfully removed ${selectedTrackIds.length} track${selectedTrackIds.length !== 1 ? 's' : ''} from playlist!`);
+      
+      // Close modal after a short delay
+      setTimeout(() => {
+        onClose();
+      }, 1500);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to remove tracks');
     } finally {
@@ -234,6 +270,12 @@ export default function BulkActionsModal({
           {error && (
             <div className="mb-4 p-3 bg-red-900/20 border border-red-700 rounded-md">
               <p className="text-red-300 text-sm">{error}</p>
+            </div>
+          )}
+
+          {successMessage && (
+            <div className="mb-4 p-3 bg-green-900/20 border border-green-700 rounded-md">
+              <p className="text-green-300 text-sm">{successMessage}</p>
             </div>
           )}
 

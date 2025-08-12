@@ -43,26 +43,42 @@ async def search_tracks(
     """
     Search for tracks using Spotify API.
     """
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         headers = {"Authorization": f"Bearer {current_user.access_token}"}
         
-        response = await client.get(
-            "https://api.spotify.com/v1/search",
-            headers=headers,
-            params={
-                "q": q,
-                "type": type,
-                "limit": limit
-            }
-        )
-        
-        if response.status_code != 200:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Spotify search failed: {response.text}"
+        try:
+            response = await client.get(
+                "https://api.spotify.com/v1/search",
+                headers=headers,
+                params={
+                    "q": q,
+                    "type": type,
+                    "limit": limit
+                }
             )
-        
-        return response.json()
+            
+            if response.status_code != 200:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Spotify search failed: {response.text}"
+                )
+            
+            return response.json()
+        except Exception as e:
+            if "timeout" in str(e).lower():
+                raise HTTPException(
+                    status_code=status.HTTP_408_REQUEST_TIMEOUT,
+                    detail="Search request timed out - please try again"
+                )
+            elif "json" in str(e).lower():
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Invalid response from Spotify API"
+                )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Search failed: {str(e)}"
+            )
 
 async def _refresh_playlist_in_db(
     playlist: Playlist,
@@ -71,7 +87,10 @@ async def _refresh_playlist_in_db(
     audio_features_service: AudioFeaturesService
 ) -> List[Track]:
     """Fetch playlist tracks and features from Spotify and upsert into DB."""
-    async with httpx.AsyncClient() as client:
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    async with httpx.AsyncClient(timeout=30.0) as client:
         access_token = current_user.access_token
         headers = {"Authorization": f"Bearer {access_token}"}
 
@@ -80,34 +99,53 @@ async def _refresh_playlist_in_db(
         offset = 0
         limit = 100
 
-        while True:
-            tracks_response = await client.get(
-                f"https://api.spotify.com/v1/playlists/{playlist.spotify_playlist_id}/tracks",
-                headers=headers,
-                params={
-                    "limit": limit,
-                    "offset": offset,
-                    "fields": "items(track(id,name,artists,album,duration_ms,popularity)),next"
-                }
-            )
-
-            if tracks_response.status_code != 200:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Failed to fetch tracks from Spotify: {tracks_response.text}"
+        try:
+            while True:
+                tracks_response = await client.get(
+                    f"https://api.spotify.com/v1/playlists/{playlist.spotify_playlist_id}/tracks",
+                    headers=headers,
+                    params={
+                        "limit": limit,
+                        "offset": offset,
+                        "fields": "items(track(id,name,artists,album,duration_ms,popularity)),next"
+                    }
                 )
 
-            batch_data = tracks_response.json()
-            items = batch_data.get("items", [])
-            all_tracks_items.extend(items)
+                if tracks_response.status_code != 200:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Failed to fetch tracks from Spotify: {tracks_response.text}"
+                    )
 
-            if not batch_data.get("next") or len(items) < limit:
-                break
+                try:
+                    batch_data = tracks_response.json()
+                except Exception as e:
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail=f"Failed to parse Spotify response: {str(e)}"
+                    )
+                    
+                items = batch_data.get("items", [])
+                all_tracks_items.extend(items)
 
-            offset += limit
+                if not batch_data.get("next") or len(items) < limit:
+                    break
 
-    # Delete existing tracks for this playlist and replace with fresh set
+                offset += limit
+                
+        except httpx.TimeoutException:
+            raise HTTPException(status_code=408, detail="Timeout fetching tracks from Spotify")
+        except httpx.RequestError as e:
+            raise HTTPException(status_code=502, detail=f"Network error: {str(e)}")
+
+    # Count before refresh
     existing_tracks = db.query(Track).filter(Track.playlist_id == playlist.id).all()
+    db_before_count = len(existing_tracks)
+    spotify_count = len(all_tracks_items)
+    
+    logger.info(f"Refreshing playlist {playlist.id}: Spotify has {spotify_count} tracks, DB has {db_before_count}")
+    
+    # Delete existing tracks for this playlist and replace with fresh set
     for t in existing_tracks:
         db.delete(t)
     db.commit()
@@ -133,17 +171,42 @@ async def _refresh_playlist_in_db(
     db.commit()
 
     # Fetch and impute missing audio features
-    await audio_features_service.fetch_and_impute_features(new_tracks, db)
-    db.commit()
-    for track in new_tracks:
-        db.refresh(track)
+    try:
+        await audio_features_service.fetch_and_impute_features(new_tracks, db)
+        db.commit()
+        for track in new_tracks:
+            db.refresh(track)
+    except Exception as e:
+        logger.warning(f"Failed to fetch audio features for playlist {playlist.id}: {str(e)}")
     
-    # Update playlist count
+    # Update playlist count and log final state
     playlist.total_tracks = len(new_tracks)
     db.commit()
     db.refresh(playlist)
-
+    
+    logger.info(f"Playlist {playlist.id} refresh complete: {len(new_tracks)} tracks in DB (was {db_before_count})")
     return new_tracks
+
+@router.post("/playlists/{playlist_id}/sync", response_model=List[TrackResponse])
+async def sync_playlist(
+    playlist_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_database),
+    audio_features_service: AudioFeaturesService = Depends(get_audio_features_service)
+):
+    """
+    Force a full sync of playlist tracks from Spotify to local DB.
+    Useful for manual refresh when tracks may be out of sync.
+    """
+    playlist = db.query(Playlist).filter(
+        Playlist.id == playlist_id, 
+        Playlist.user_id == current_user.id
+    ).first()
+    
+    if not playlist:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+    
+    return await _refresh_playlist_in_db(playlist, current_user, db, audio_features_service)
 
 @router.post("/playlists", response_model=PlaylistResponse, status_code=status.HTTP_201_CREATED)
 async def create_playlist(
@@ -155,24 +218,29 @@ async def create_playlist(
     Create a new playlist on Spotify and persist minimal metadata in DB.
     """
     # Create on Spotify
-    async with httpx.AsyncClient() as client:
-        headers = {
-            "Authorization": f"Bearer {current_user.access_token}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "name": body.name,
-            "description": body.description or "",
-            "public": body.is_public,
-        }
-        resp = await client.post(
-            f"https://api.spotify.com/v1/users/{current_user.spotify_user_id}/playlists",
-            headers=headers,
-            json=payload,
-        )
-        if resp.status_code not in (200, 201):
-            raise HTTPException(status_code=resp.status_code, detail=f"Spotify create failed: {resp.text}")
-        sp = resp.json()
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            headers = {
+                "Authorization": f"Bearer {current_user.access_token}",
+                "Content-Type": "application/json",
+            }
+            payload = {
+                "name": body.name,
+                "description": body.description or "",
+                "public": body.is_public,
+            }
+            resp = await client.post(
+                f"https://api.spotify.com/v1/users/{current_user.spotify_user_id}/playlists",
+                headers=headers,
+                json=payload,
+            )
+            if resp.status_code not in (200, 201):
+                raise HTTPException(status_code=resp.status_code, detail=f"Spotify create failed: {resp.text}")
+            sp = resp.json()
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Timeout communicating with Spotify API")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error creating playlist: {str(e)}")
 
     # Upsert in DB
     playlist = Playlist(
@@ -217,27 +285,32 @@ async def update_playlist(
     if not playlist:
         raise HTTPException(status_code=404, detail="Playlist not found")
 
-    async with httpx.AsyncClient() as client:
-        headers = {
-            "Authorization": f"Bearer {current_user.access_token}",
-            "Content-Type": "application/json",
-        }
-        payload = {}
-        if body.name:
-            payload["name"] = body.name
-        if body.description is not None:
-            payload["description"] = body.description
-        if body.is_public is not None:
-            payload["public"] = body.is_public
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            headers = {
+                "Authorization": f"Bearer {current_user.access_token}",
+                "Content-Type": "application/json",
+            }
+            payload = {}
+            if body.name:
+                payload["name"] = body.name
+            if body.description is not None:
+                payload["description"] = body.description
+            if body.is_public is not None:
+                payload["public"] = body.is_public
 
-        if payload:
-            resp = await client.put(
-                f"https://api.spotify.com/v1/playlists/{playlist.spotify_playlist_id}",
-                headers=headers,
-                json=payload,
-            )
-            if resp.status_code not in (200, 201, 202, 204):
-                raise HTTPException(status_code=resp.status_code, detail=f"Spotify update failed: {resp.text}")
+            if payload:
+                resp = await client.put(
+                    f"https://api.spotify.com/v1/playlists/{playlist.spotify_playlist_id}",
+                    headers=headers,
+                    json=payload,
+                )
+                if resp.status_code not in (200, 201, 202, 204):
+                    raise HTTPException(status_code=resp.status_code, detail=f"Spotify update failed: {resp.text}")
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Timeout communicating with Spotify API")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error updating playlist: {str(e)}")
 
     # Update DB
     if body.name:
@@ -263,15 +336,19 @@ async def delete_playlist(
     if not playlist:
         raise HTTPException(status_code=404, detail="Playlist not found")
 
-    async with httpx.AsyncClient() as client:
-        headers = {"Authorization": f"Bearer {current_user.access_token}"}
-        resp = await client.delete(
-            f"https://api.spotify.com/v1/playlists/{playlist.spotify_playlist_id}/followers",
-            headers=headers,
-        )
-        if resp.status_code not in (200, 202, 204):
-            # Still try to remove locally if Spotify rejected (e.g., not owner)
-            pass
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            headers = {"Authorization": f"Bearer {current_user.access_token}"}
+            resp = await client.delete(
+                f"https://api.spotify.com/v1/playlists/{playlist.spotify_playlist_id}/followers",
+                headers=headers,
+            )
+            if resp.status_code not in (200, 202, 204):
+                # Still try to remove locally if Spotify rejected (e.g., not owner)
+                pass
+    except Exception:
+        # Continue with local deletion even if Spotify operation fails
+        pass
 
     # Remove from DB
     # Delete tracks first
@@ -285,7 +362,7 @@ async def delete_playlist(
 async def add_tracks_to_playlist(
     playlist_id: int,
     req: AddTracksRequest,
-    refresh: bool = Query(False, description="Refresh DB after adding"),
+    refresh: bool = Query(True, description="Refresh DB after adding"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_database),
     audio_features_service: AudioFeaturesService = Depends(get_audio_features_service)
@@ -301,62 +378,69 @@ async def add_tracks_to_playlist(
     if not req.track_ids:
         raise HTTPException(status_code=400, detail="No track IDs provided")
 
-    # Get existing tracks in the target playlist to check for duplicates
-    async with httpx.AsyncClient() as client:
-        headers = {"Authorization": f"Bearer {current_user.access_token}"}
-        
-        # Fetch existing tracks from Spotify to get current state
-        existing_tracks = []
-        offset = 0
-        limit = 100
-        
-        while True:
-            resp = await client.get(
-                f"https://api.spotify.com/v1/playlists/{playlist.spotify_playlist_id}/tracks",
-                headers=headers,
-                params={"limit": limit, "offset": offset, "fields": "items(track(id)),total,next"}
-            )
-            if resp.status_code != 200:
-                # If we can't fetch existing tracks, proceed without duplicate checking
-                break
-                
-            data = resp.json()
-            for item in data.get("items", []):
-                if item.get("track") and item["track"].get("id"):
-                    existing_tracks.append(item["track"]["id"])
-            
-            if not data.get("next"):
-                break
-            offset += limit
-
-    # Filter out tracks that already exist in the playlist
-    existing_track_ids = set(existing_tracks)
-    new_track_ids = [tid for tid in req.track_ids if tid not in existing_track_ids]
+    # Single async context manager for all HTTP operations
+    timeout_config = httpx.Timeout(30.0)
+    headers = {"Authorization": f"Bearer {current_user.access_token}"}
     
-    if not new_track_ids:
-        # All tracks already exist in the playlist
-        if refresh:
+    try:
+        async with httpx.AsyncClient(timeout=timeout_config) as client:
+            # Step 1: Fetch existing tracks to check for duplicates
+            existing_track_ids = set()
+            offset = 0
+            limit = 100
+            
+            while True:
+                try:
+                    resp = await client.get(
+                        f"https://api.spotify.com/v1/playlists/{playlist.spotify_playlist_id}/tracks",
+                        headers=headers,
+                        params={"limit": limit, "offset": offset, "fields": "items(track(id)),total,next"}
+                    )
+                    if resp.status_code != 200:
+                        break
+                        
+                    data = resp.json()
+                    for item in data.get("items", []):
+                        if item.get("track") and item["track"].get("id"):
+                            existing_track_ids.add(item["track"]["id"])
+                    
+                    if not data.get("next"):
+                        break
+                    offset += limit
+                except Exception:
+                    break
+
+            # Step 2: Filter out duplicate tracks
+            new_track_ids = [tid for tid in req.track_ids if tid not in existing_track_ids]
+            
+            # Step 3: Add new tracks if any
+            if new_track_ids:
+                uris = [f"spotify:track:{tid}" for tid in new_track_ids]
+                resp = await client.post(
+                    f"https://api.spotify.com/v1/playlists/{playlist.spotify_playlist_id}/tracks",
+                    headers={
+                        "Authorization": f"Bearer {current_user.access_token}",
+                        "Content-Type": "application/json",
+                    },
+                    json={"uris": uris},
+                )
+                if resp.status_code not in (200, 201):
+                    raise HTTPException(status_code=resp.status_code, detail=f"Spotify add tracks failed: {resp.text}")
+                    
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=408, detail="Request timed out - please try again")
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=500, detail=f"Network error: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing request: {str(e)}")
+
+    # Handle refresh and return logic
+    if refresh:
+        try:
             current_tracks = await _refresh_playlist_in_db(playlist, current_user, db, audio_features_service)
             return current_tracks
-        return db.query(Track).filter(Track.playlist_id == playlist.id).all()
-    
-    # Add only the new tracks
-    uris = [f"spotify:track:{tid}" for tid in new_track_ids]
-    resp = await client.post(
-        f"https://api.spotify.com/v1/playlists/{playlist.spotify_playlist_id}/tracks",
-        headers={
-            "Authorization": f"Bearer {current_user.access_token}",
-            "Content-Type": "application/json",
-        },
-        json={"uris": uris},
-    )
-    if resp.status_code not in (200, 201):
-        raise HTTPException(status_code=resp.status_code, detail=f"Spotify add tracks failed: {resp.text}")
-
-    # Optionally refresh DB
-    if refresh:
-        new_tracks = await _refresh_playlist_in_db(playlist, current_user, db, audio_features_service)
-        return new_tracks
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to refresh playlist data: {str(e)}")
     
     # Return current tracks without refresh
     return db.query(Track).filter(Track.playlist_id == playlist.id).all()
@@ -365,7 +449,7 @@ async def add_tracks_to_playlist(
 async def remove_track_from_playlist(
     playlist_id: int,
     spotify_track_id: str,
-    refresh: bool = Query(False, description="Refresh DB after removal"),
+    refresh: bool = Query(True, description="Refresh DB after removal"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_database),
     audio_features_service: AudioFeaturesService = Depends(get_audio_features_service)
@@ -378,22 +462,27 @@ async def remove_track_from_playlist(
     if not playlist:
         raise HTTPException(status_code=404, detail="Playlist not found")
 
-    async with httpx.AsyncClient() as client:
-        headers = {
-            "Authorization": f"Bearer {current_user.access_token}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "tracks": [{"uri": f"spotify:track:{spotify_track_id}"}]
-        }
-        resp = await client.request(
-            method="DELETE",
-            url=f"https://api.spotify.com/v1/playlists/{playlist.spotify_playlist_id}/tracks",
-            headers=headers,
-            json=payload,
-        )
-        if resp.status_code not in (200, 201, 202):
-            raise HTTPException(status_code=resp.status_code, detail=f"Spotify remove track failed: {resp.text}")
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            headers = {
+                "Authorization": f"Bearer {current_user.access_token}",
+                "Content-Type": "application/json",
+            }
+            payload = {
+                "tracks": [{"uri": f"spotify:track:{spotify_track_id}"}]
+            }
+            resp = await client.request(
+                method="DELETE",
+                url=f"https://api.spotify.com/v1/playlists/{playlist.spotify_playlist_id}/tracks",
+                headers=headers,
+                json=payload,
+            )
+            if resp.status_code not in (200, 201, 202):
+                raise HTTPException(status_code=resp.status_code, detail=f"Spotify remove track failed: {resp.text}")
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Timeout communicating with Spotify API")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error removing track: {str(e)}")
 
     if refresh:
         await _refresh_playlist_in_db(playlist, current_user, db, audio_features_service)

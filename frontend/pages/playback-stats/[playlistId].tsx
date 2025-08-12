@@ -6,7 +6,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { ArrowLeft, Play, BarChart3, Loader2, RefreshCw, Settings } from 'lucide-react';
-import useSWR from 'swr';
+import useSWR, { mutate } from 'swr';
 
 import Layout from '@/components/Layout';
 import EnhancedStatsTable from '@/components/EnhancedStatsTable';
@@ -99,6 +99,7 @@ export default function PlaylistStats() {
   const [analysisResult, setAnalysisResult] = useState<IAnalysisResult | null>(
     null,
   );
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // Callback for when playlist/tracks are updated
   const handleDataUpdated = () => {
@@ -106,6 +107,38 @@ export default function PlaylistStats() {
     if (playlistId) {
       // Clear analysis result since track data may have changed
       setAnalysisResult(null);
+    }
+  };
+
+  const handleSyncWithSpotify = async () => {
+    if (!playlistId) return;
+
+    setIsSyncing(true);
+    try {
+      const response = await fetch(`/api/playlists/${playlistId}/sync`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('access_token')}`,
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
+        throw new Error(errorData.detail || `Failed to sync: ${response.status}`);
+      }
+
+      // Refresh all data after sync
+      mutate(`/api/analytics/playlists/${playlistId}/tracks`);
+      mutate(`/api/analytics/playlists/${playlistId}/stats`);
+      mutate(`/api/playlists/${playlistId}`);
+      
+      console.log('Successfully synced with Spotify');
+    } catch (error) {
+      console.error('Failed to sync with Spotify:', error);
+      // Show an alert for now - you could add a toast notification system later
+      alert(`Sync failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -223,6 +256,14 @@ export default function PlaylistStats() {
                   className="flex items-center space-x-2 px-3 py-2 rounded-lg bg-spotify-gray-700 hover:bg-spotify-gray-600 text-white transition-colors">
                   <ArrowLeft className="h-4 w-4" />
                   <span>Back to Dashboard</span>
+                </button>
+
+                <button
+                  onClick={handleSyncWithSpotify}
+                  disabled={isSyncing}
+                  className="flex items-center space-x-2 px-3 py-2 rounded-lg bg-spotify-green hover:bg-spotify-green/90 disabled:opacity-50 disabled:cursor-not-allowed text-white transition-colors">
+                  <RefreshCw className={`h-4 w-4 ${isSyncing ? 'animate-spin' : ''}`} />
+                  <span>{isSyncing ? 'Syncing...' : 'Sync with Spotify'}</span>
                 </button>
 
                 <div>

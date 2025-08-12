@@ -147,3 +147,5 @@ temp/
 .windsurf/rules
 .github/
 tests/
+
+*.mp4
