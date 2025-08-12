@@ -44,7 +44,7 @@ export default function BulkActionsModal({
     setIsLoading(true);
     setError(null);
     try {
-      const response = await fetch('/api/playlists', {
+      const response = await fetch('/api/analytics/playlists', {
         headers: {
           Authorization: `Bearer ${localStorage.getItem('access_token')}`,
         },
