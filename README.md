@@ -5,12 +5,14 @@ A comprehensive machine learning application that analyzes and manages Spotify p
 ## ✨ Key Features
 
 ### 🎵 Playlist Analysis
-- **Multi-Algorithm Clustering**: K-Means, DBSCAN, Gaussian Mixture, Spectral clustering
+
+- **Multi-Algorithm Clustering**: K-Means, DBSCAN
 - **Audio Feature Analysis**: Integration with ReccoBeats API for enhanced audio features
 - **Interactive Visualization**: PCA scatter plots with cluster coloring and tooltips
 - **Quality Metrics**: Silhouette scores and cluster quality assessment
 
 ### 🛠️ Playlist Management (CRUD Operations)
+
 - **Create**: New playlist creation with customizable settings
 - **Read**: Detailed playlist metadata and track information
 - **Update**: Modify playlist name, description, and privacy settings
@@ -18,12 +20,14 @@ A comprehensive machine learning application that analyzes and manages Spotify p
 - **Track Management**: Add/remove tracks with Spotify search integration
 
 ### 📊 Smart Analytics
+
 - **Behavioral Modeling**: Skip pattern analysis and engagement scoring
 - **Hidden Gem Detection**: Identification of underappreciated tracks
 - **Performance Metrics**: Track and playlist performance insights
 - **Optimization Suggestions**: Data-driven recommendations (coming soon)
 
 ### 🎨 Modern UI/UX
+
 - **Spotify-Themed Design**: Consistent branding with dark theme
 - **Responsive Layout**: Mobile-friendly adaptive components
 - **Real-time Updates**: Live clustering and analysis controls
@@ -32,12 +36,14 @@ A comprehensive machine learning application that analyzes and manages Spotify p
 ## 🚀 Quick Start
 
 ### Prerequisites
+
 - Python 3.8+
 - Node.js 16+
 - Spotify Developer Account
 - PostgreSQL (optional, SQLite included)
 
 ### Backend Setup
+
 ```bash
 cd backend
 pip install -r requirements.txt
@@ -47,6 +53,7 @@ python main.py
 ```
 
 ### Frontend Setup
+
 ```bash
 cd frontend
 npm install
@@ -54,6 +61,7 @@ npm run dev
 ```
 
 ### Database Initialization
+
 ```bash
 cd scripts
 python init_database.py
@@ -62,12 +70,14 @@ python init_database.py
 ## 🏗️ Technical Architecture
 
 ### Backend Stack
+
 - **FastAPI**: REST API with automatic OpenAPI documentation
 - **SQLAlchemy**: Database ORM with PostgreSQL/SQLite support
 - **Async Processing**: Non-blocking audio feature fetching
 - **Pydantic**: Type-safe data validation and serialization
 
 ### Frontend Stack
+
 - **Next.js 14**: React framework with App Router
 - **TypeScript**: Strict type checking for reliability
 - **Tailwind CSS**: Utility-first styling system
@@ -75,6 +85,7 @@ python init_database.py
 - **Recharts**: Interactive data visualization
 
 ### External Integrations
+
 - **Spotify Web API**: Playlist and track data access
 - **ReccoBeats API**: Enhanced audio feature analysis
 - **OAuth 2.0**: Secure authentication flow
@@ -82,21 +93,25 @@ python init_database.py
 ## 📱 Usage Guide
 
 ### 1. Authentication
+
 - Log in with your Spotify account
 - Grant necessary permissions for playlist access
 
 ### 2. Playlist Analysis
+
 - Import playlists from your Spotify library
 - Choose clustering algorithm (K-Means or DBSCAN)
 - Analyze audio features and view cluster visualizations
 
 ### 3. Playlist Management
+
 - **Create**: Click "New Playlist" to create fresh playlists
 - **Edit**: Use the Playlist tab to modify metadata
 - **Tracks**: Add/remove tracks via search or bulk operations
 - **Organize**: Use clustering insights to optimize track order
 
 ### 4. Insights & Optimization
+
 - View detailed statistics and audio feature analysis
 - Identify patterns in your music preferences
 - Get recommendations for playlist improvements
@@ -104,22 +119,26 @@ python init_database.py
 ## 🛠️ API Endpoints
 
 ### Authentication
+
 - `GET /auth/login` - Initiate Spotify OAuth flow
 - `GET /auth/callback` - Handle OAuth callback
 - `POST /auth/logout` - Logout user
 
 ### Playlist CRUD
+
 - `POST /api/playlists` - Create new playlist
 - `GET /api/playlists/{id}` - Get playlist metadata
 - `PUT /api/playlists/{id}` - Update playlist
 - `DELETE /api/playlists/{id}` - Delete playlist
 
 ### Track Management
+
 - `POST /api/playlists/{id}/tracks` - Add tracks to playlist
 - `DELETE /api/playlists/{id}/tracks/{trackId}` - Remove track
 - `GET /api/search` - Search Spotify catalog
 
 ### Analytics
+
 - `POST /api/analytics/playlists/{id}/analyze` - Run clustering analysis
 - `GET /api/analytics/playlists/{id}/stats` - Get playlist statistics
 - `GET /api/analytics/playlists/{id}/tracks` - Get detailed track data
@@ -127,12 +146,14 @@ python init_database.py
 ## 🧪 Testing
 
 ### Run Backend Tests
+
 ```bash
 cd backend
 python -m pytest tests/
 ```
 
 ### Run Frontend Tests
+
 ```bash
 cd frontend
 npm test
@@ -141,6 +162,7 @@ npm test
 ## 🚧 Development Status
 
 ### ✅ Completed Features
+
 - [x] Multi-algorithm clustering engine
 - [x] Interactive PCA visualization
 - [x] Spotify OAuth authentication
@@ -154,14 +176,15 @@ npm test
 - [x] Scrollable tables with resizable columns
 
 ### 🔄 In Progress
-- [ ] Advanced optimization algorithms
+
+- [ ] Advanced optimization algorithms - Gaussian Mixture, Spectral clustering
 - [ ] Playlist collaboration features
 
 ### 📋 Planned Features
-- [ ] Mobile app development
-- [ ] Social sharing capabilities
+
 - [ ] Advanced recommendation engine
 - [ ] Historical analysis tracking
+- [ ] Measuring skip rate to identify overplayed/underplayed songs
 
 ## 🤝 Contributing
 
