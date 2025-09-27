@@ -2,7 +2,7 @@
 
 A comprehensive machine learning application that analyzes and manages Spotify playlists using advanced clustering algorithms and audio feature analysis.
 
-## Watch the Demo
+## Watch the Demo (Click Thumbnail)
 
 [![Watch the demo](https://i.imgur.com/gQuY5X9.png)](https://youtu.be/oDh19udD8h0)
 
